@@ -495,7 +495,7 @@ func main() {
 	cmdServe.Flags().StringVarP(&addr, "http", "", ":8080", "HTTP bind address to serve")
 	cmdServe.Run = func(cmd *cobra.Command, args []string) {
 		options.BuildTags = strings.Fields(tags)
-		dirs := append(filepath.SplitList(build.Default.GOPATH), build.Default.GOROOT)
+		dirs := append(filepath.SplitList(build.Default.GOPATH), gbuild.DefaultGOROOT)
 		var root string
 
 		if len(args) > 1 {

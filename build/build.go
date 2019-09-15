@@ -28,6 +28,17 @@ import (
 	"golang.org/x/tools/go/buildutil"
 )
 
+// DefaultGOROOT is the default GOROOT value to use
+// when the user hasn't provided a custom one.
+var DefaultGOROOT = func() string {
+	if goroot, ok := os.LookupEnv("GOPHERJS_GOROOT"); ok {
+		// GopherJS-specific GOROOT value takes precedence.
+		return goroot
+	}
+	// The usual default GOROOT.
+	return build.Default.GOROOT
+}()
+
 type ImportCError struct {
 	pkgPath string
 }
@@ -42,9 +53,9 @@ func (e *ImportCError) Error() string {
 // Core GopherJS packages (i.e., "github.com/gopherjs/gopherjs/js", "github.com/gopherjs/gopherjs/nosync")
 // are loaded from gopherjspkg.FS virtual filesystem rather than GOPATH.
 func NewBuildContext(installSuffix string, buildTags []string) *build.Context {
-	gopherjsRoot := filepath.Join(build.Default.GOROOT, "src", "github.com", "gopherjs", "gopherjs")
+	gopherjsRoot := filepath.Join(DefaultGOROOT, "src", "github.com", "gopherjs", "gopherjs")
 	return &build.Context{
-		GOROOT:        build.Default.GOROOT,
+		GOROOT:        DefaultGOROOT,
 		GOPATH:        build.Default.GOPATH,
 		GOOS:          build.Default.GOOS,
 		GOARCH:        "js",
@@ -92,7 +103,7 @@ func NewBuildContext(installSuffix string, buildTags []string) *build.Context {
 // For files in "$GOROOT/src/github.com/gopherjs/gopherjs" directory,
 // gopherjspkg.FS is consulted first.
 func statFile(path string) (os.FileInfo, error) {
-	gopherjsRoot := filepath.Join(build.Default.GOROOT, "src", "github.com", "gopherjs", "gopherjs")
+	gopherjsRoot := filepath.Join(DefaultGOROOT, "src", "github.com", "gopherjs", "gopherjs")
 	if strings.HasPrefix(path, gopherjsRoot+string(filepath.Separator)) {
 		path = filepath.ToSlash(path[len(gopherjsRoot):])
 		if fi, err := vfsutil.Stat(gopherjspkg.FS, path); err == nil {
@@ -183,10 +194,10 @@ func importWithSrcDir(bctx build.Context, path string, srcDir string, mode build
 		pkg.PkgObj = filepath.Join(pkg.BinDir, filepath.Base(pkg.ImportPath)+".js")
 	}
 
-	if _, err := os.Stat(pkg.PkgObj); os.IsNotExist(err) && strings.HasPrefix(pkg.PkgObj, build.Default.GOROOT) {
+	if _, err := os.Stat(pkg.PkgObj); os.IsNotExist(err) && strings.HasPrefix(pkg.PkgObj, DefaultGOROOT) {
 		// fall back to GOPATH
 		firstGopathWorkspace := filepath.SplitList(build.Default.GOPATH)[0] // TODO: Need to check inside all GOPATH workspaces.
-		gopathPkgObj := filepath.Join(firstGopathWorkspace, pkg.PkgObj[len(build.Default.GOROOT):])
+		gopathPkgObj := filepath.Join(firstGopathWorkspace, pkg.PkgObj[len(DefaultGOROOT):])
 		if _, err := os.Stat(gopathPkgObj); err == nil {
 			pkg.PkgObj = gopathPkgObj
 		}
@@ -478,7 +489,7 @@ type Session struct {
 
 func NewSession(options *Options) (*Session, error) {
 	if options.GOROOT == "" {
-		options.GOROOT = build.Default.GOROOT
+		options.GOROOT = DefaultGOROOT
 	}
 	if options.GOPATH == "" {
 		options.GOPATH = build.Default.GOPATH
