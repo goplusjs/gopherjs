@@ -507,6 +507,11 @@ func main() {
 			root = args[0]
 		}
 
+		_, err := gbuild.NewSession(options)
+		if err != nil {
+			options.PrintError("%s\n", err)
+			os.Exit(1)
+		}
 		sourceFiles := http.FileServer(serveCommandFileSystem{
 			serveRoot:  root,
 			options:    options,
@@ -587,11 +592,13 @@ func (fs serveCommandFileSystem) Open(requestName string) (http.File, error) {
 	isIndex := file == "index.html"
 
 	if isPkg || isMap || isIndex {
-		// If we're going to be serving our special files, make sure there's a Go command in this folder.
+		// TODO: a single session should probably be able to detect changes to source code on disk
+		// Create a new session to pick up changes to source code on disk.
 		s, err := gbuild.NewSession(fs.options)
 		if err != nil {
 			return nil, err
 		}
+		// If we're going to be serving our special files, make sure there's a Go command in this folder.
 		pkg, err := gbuild.Import(path.Dir(name), 0, s.InstallSuffix(), fs.options.BuildTags)
 		if err != nil || pkg.Name != "main" {
 			isPkg = false
