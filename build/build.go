@@ -476,7 +476,7 @@ type Session struct {
 	Watcher  *fsnotify.Watcher
 }
 
-func NewSession(options *Options) *Session {
+func NewSession(options *Options) (*Session, error) {
 	if options.GOROOT == "" {
 		options.GOROOT = build.Default.GOROOT
 	}
@@ -484,6 +484,11 @@ func NewSession(options *Options) *Session {
 		options.GOPATH = build.Default.GOPATH
 	}
 	options.Verbose = options.Verbose || options.Watch
+
+	// Go distribution version check.
+	if err := compiler.CheckGoVersion(options.GOROOT); err != nil {
+		return nil, err
+	}
 
 	s := &Session{
 		options:  options,
@@ -501,10 +506,10 @@ func NewSession(options *Options) *Session {
 		var err error
 		s.Watcher, err = fsnotify.NewWatcher()
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
-	return s
+	return s, nil
 }
 
 // BuildContext returns the session's build context.

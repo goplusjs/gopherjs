@@ -94,9 +94,13 @@ func main() {
 	cmdBuild.Run = func(cmd *cobra.Command, args []string) {
 		options.BuildTags = strings.Fields(tags)
 		for {
-			s := gbuild.NewSession(options)
+			s, err := gbuild.NewSession(options)
+			if err != nil {
+				options.PrintError("%s\n", err)
+				os.Exit(1)
+			}
 
-			err := func() error {
+			err = func() error {
 				// Handle "gopherjs build [files]" ad-hoc package mode.
 				if len(args) > 0 && (strings.HasSuffix(args[0], ".go") || strings.HasSuffix(args[0], ".inc.js")) {
 					for _, arg := range args {
@@ -173,9 +177,13 @@ func main() {
 	cmdInstall.Run = func(cmd *cobra.Command, args []string) {
 		options.BuildTags = strings.Fields(tags)
 		for {
-			s := gbuild.NewSession(options)
+			s, err := gbuild.NewSession(options)
+			if err != nil {
+				options.PrintError("%s\n", err)
+				os.Exit(1)
+			}
 
-			err := func() error {
+			err = func() error {
 				// Expand import path patterns.
 				patternContext := gbuild.NewBuildContext("", options.BuildTags)
 				pkgs := (&gotool.Context{BuildContext: *patternContext}).ImportPaths(args)
@@ -274,7 +282,10 @@ func main() {
 				os.Remove(tempfile.Name())
 				os.Remove(tempfile.Name() + ".map")
 			}()
-			s := gbuild.NewSession(options)
+			s, err := gbuild.NewSession(options)
+			if err != nil {
+				return err
+			}
 			if err := s.BuildFiles(args[:lastSourceArg], tempfile.Name(), currentDirectory); err != nil {
 				return err
 			}
@@ -330,7 +341,10 @@ func main() {
 					fmt.Printf("?   \t%s\t[no test files]\n", pkg.ImportPath)
 					continue
 				}
-				s := gbuild.NewSession(options)
+				s, err := gbuild.NewSession(options)
+				if err != nil {
+					return err
+				}
 
 				tests := &testFuncs{BuildContext: s.BuildContext(), Package: pkg.Package}
 				collectTests := func(testPkg *gbuild.PackageData, testPkgName string, needVar *bool) error {
@@ -574,7 +588,10 @@ func (fs serveCommandFileSystem) Open(requestName string) (http.File, error) {
 
 	if isPkg || isMap || isIndex {
 		// If we're going to be serving our special files, make sure there's a Go command in this folder.
-		s := gbuild.NewSession(fs.options)
+		s, err := gbuild.NewSession(fs.options)
+		if err != nil {
+			return nil, err
+		}
 		pkg, err := gbuild.Import(path.Dir(name), 0, s.InstallSuffix(), fs.options.BuildTags)
 		if err != nil || pkg.Name != "main" {
 			isPkg = false
