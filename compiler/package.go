@@ -165,7 +165,7 @@ func Compile(importPath string, files []*ast.File, fileSet *token.FileSet, impor
 	importContext.Packages[importPath] = typesPkg
 
 	exportData := new(bytes.Buffer)
-	if err := gcexportdata.Write(exportData, nil, typesPkg); err != nil {
+	if err := gcexportdata.Write(exportData, token.NewFileSet(), typesPkg); err != nil {
 		return nil, fmt.Errorf("failed to write export data: %v", err)
 	}
 	encodedFileSet := new(bytes.Buffer)
