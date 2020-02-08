@@ -78,6 +78,7 @@ func main() {
 	compilerFlags.BoolVar(&options.Color, "color", terminal.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb", "colored output")
 	compilerFlags.StringVar(&tags, "tags", "", "a list of build tags to consider satisfied during the build")
 	compilerFlags.BoolVar(&options.MapToLocalDisk, "localmap", false, "use local paths for sourcemap")
+	compilerFlags.BoolVarP(&options.Rebuild, "force", "f", false, "force rebuilding of packages that are already up-to-date")
 
 	flagWatch := pflag.NewFlagSet("", 0)
 	flagWatch.BoolVarP(&options.Watch, "watch", "w", false, "watch for changes to the source files")
@@ -123,7 +124,6 @@ func main() {
 				// Expand import path patterns.
 				patternContext := gbuild.NewBuildContext("", options.BuildTags)
 				pkgs := (&gotool.Context{BuildContext: *patternContext}).ImportPaths(args)
-
 				for _, pkgPath := range pkgs {
 					if s.Watcher != nil {
 						pkg, err := gbuild.NewBuildContext(s.InstallSuffix(), options.BuildTags).Import(pkgPath, "", build.FindOnly)
@@ -136,6 +136,8 @@ func main() {
 					if err != nil {
 						return err
 					}
+					s.LoadMod(pkg.Dir)
+
 					archive, err := s.BuildPackage(pkg)
 					if err != nil {
 						return err
@@ -196,6 +198,7 @@ func main() {
 					if err != nil {
 						return err
 					}
+					s.LoadMod(pkg.Dir)
 
 					archive, err := s.BuildPackage(pkg)
 					if err != nil {
@@ -331,6 +334,7 @@ func main() {
 					continue
 				}
 				s := gbuild.NewSession(options)
+				s.LoadMod(pkg.Dir)
 
 				tests := &testFuncs{BuildContext: s.BuildContext(), Package: pkg.Package}
 				collectTests := func(testPkg *gbuild.PackageData, testPkgName string, needVar *bool) error {
@@ -584,6 +588,8 @@ func (fs serveCommandFileSystem) Open(requestName string) (http.File, error) {
 
 		switch {
 		case isPkg:
+			s.LoadMod(pkg.Dir)
+
 			buf := new(bytes.Buffer)
 			browserErrors := new(bytes.Buffer)
 			err := func() error {
