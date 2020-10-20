@@ -45,7 +45,7 @@ func main() {
 	}
 	var init bool
 	for _, pkg := range strings.Split(string(list), "\n") {
-		if pkg == "reflect" {
+		if pkg == "sync" {
 			init = true
 		}
 		if pkg == "" || check_skip(pkg) {
