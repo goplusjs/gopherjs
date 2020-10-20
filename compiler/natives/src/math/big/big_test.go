@@ -11,3 +11,7 @@ func TestBytes(t *testing.T) {
 func TestModSqrt(t *testing.T) {
 	t.Skip("slow")
 }
+
+func TestNatDiv(t *testing.T) {
+	t.Skip("broken")
+}

@@ -15,6 +15,9 @@ go/internal/gcimporter
 go/internal/srcimporter
 go/types
 hash
+hash/maphash
+path/filepath
+internal/unsafeheader
 image/color/palette
 image/internal/imageutil
 internal/cpu
