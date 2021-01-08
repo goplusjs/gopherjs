@@ -218,7 +218,7 @@ func (n *treeMapNode) Describe() string {
 // String representation of the node and its effective children.
 func (n *treeMapNode) String() string {
 	s := &strings.Builder{}
-	fmt.Fprintf(s, " %s %s\n", strings.Repeat(" *", n.depth), n.Describe())
+	fmt.Fprintf(s, " %s %s\n", strings.Repeat(" |", n.depth), n.Describe())
 	for _, c := range n.effectiveChildren {
 		s.WriteString(c.String())
 	}

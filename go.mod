@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/fsnotify/fsnotify v1.4.7
+	github.com/google/go-cmp v0.5.4
 	github.com/gopherjs/gopherjs v0.0.0-20200217142428-fce0ec30dd00
 	github.com/kisielk/gotool v1.0.0
 	github.com/neelance/astrewrite v0.0.0-20160511093645-99348263ae86

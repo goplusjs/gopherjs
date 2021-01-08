@@ -21,9 +21,9 @@ func TestTreeNodeOrganize(t *testing.T) {
 	// shorter path to the tree root.
 	want := "" +
 		"  main — 1.0 MiB own size, 1.1 MiB with children\n" +
-		"  * fmt — 50 KiB own size, 51 KiB with children\n" +
-		"  * * strconv — 1.0 KiB own size, 1.0 KiB with children\n" +
-		"  * io — 10 KiB own size, 10 KiB with children\n"
+		"  | fmt — 50 KiB own size, 51 KiB with children\n" +
+		"  | | strconv — 1.0 KiB own size, 1.0 KiB with children\n" +
+		"  | io — 10 KiB own size, 10 KiB with children\n"
 	got := main.String()
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("main.organizeTree() produced unexpected structure (-want,+got):\n%s", diff)

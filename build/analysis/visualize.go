@@ -10,9 +10,10 @@ import (
 // Visualizer renders a TreeMap diagram representing the generated JS file and
 // how different packages contributed it its size.
 type Visualizer struct {
-	File *os.File
-	Main *compiler.Archive
-	Deps []*compiler.Archive
+	File       *os.File
+	Main       *compiler.Archive
+	Deps       []*compiler.Archive
+	PrintStats bool
 }
 
 // Render a Tree Map diagram for the given package sizes.
@@ -32,6 +33,10 @@ func (v *Visualizer) Render(stats map[string]int) error {
 		return err
 	}
 	fmt.Fprintf(v.File, "</svg>\n")
+
+	if v.PrintStats {
+		fmt.Println(tree)
+	}
 	return nil
 }
 

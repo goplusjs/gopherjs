@@ -966,9 +966,10 @@ func (s *Session) WriteCommandPackage(archive *compiler.Archive, pkgObj string) 
 		}
 		defer f.Close()
 		visualizer := &analysis.Visualizer{
-			Main: archive,
-			Deps: deps,
-			File: f,
+			Main:       archive,
+			Deps:       deps,
+			File:       f,
+			PrintStats: s.options.Verbose && !s.options.Quiet,
 		}
 		defer func() {
 			if err := visualizer.Render(sourceMapFilter.BytesWritten); err != nil {
