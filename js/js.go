@@ -64,7 +64,7 @@ func (o *Object) Invoke2(args ...interface{}) (_ *Object, rerr error) {
 			rErr = err
 		}
 	}()
-	return o.object.Invoke(args...)
+	return o.object.Invoke(args...), nil
 }
 
 // New creates a new instance of this type object. This will fail if it not a function (constructor).
@@ -82,7 +82,7 @@ func (o *Object) New2(args ...interface{}) (_ *Object, rerr error) {
 			rErr = err
 		}
 	}()
-	return o.object.New(args...)
+	return o.object.New(args...), nil
 }
 
 // Bool returns the object converted to bool according to JavaScript type conversions.
