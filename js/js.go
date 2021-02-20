@@ -54,7 +54,7 @@ func (o *Object) Invoke(args ...interface{}) *Object { return o.object.Invoke(ar
 
 // Invoke2 calls the object itself. This will fail if it is not a function.
 // If the call throws a Javascript error, an *Error is returned.
-func (o *Object) Invoke2(args ...interface{}) (_ *Object, rerr error) {
+func (o *Object) Invoke2(args ...interface{}) (_ *Object, rErr error) {
 	defer func() {
 		if e := recover(); e != nil {
 			err, ok := e.(*Error)
@@ -72,7 +72,7 @@ func (o *Object) New(args ...interface{}) *Object { return o.object.New(args...)
 
 // New2 creates a new instance of this type object. This will fail if it not a function (constructor).
 // If calling New throws a Javascript error, an *Error is returned.
-func (o *Object) New2(args ...interface{}) (_ *Object, rerr error) {
+func (o *Object) New2(args ...interface{}) (_ *Object, rErr error) {
 	defer func() {
 		if e := recover(); e != nil {
 			err, ok := e.(*Error)
