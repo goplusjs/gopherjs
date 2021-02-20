@@ -52,8 +52,38 @@ func (o *Object) Call(name string, args ...interface{}) *Object { return o.objec
 // Invoke calls the object itself. This will fail if it is not a function.
 func (o *Object) Invoke(args ...interface{}) *Object { return o.object.Invoke(args...) }
 
+// Invoke2 calls the object itself. This will fail if it is not a function.
+// If the call throws a Javascript error, an *Error is returned.
+func (o *Object) Invoke2(args ...interface{}) (_ *Object, rerr error) {
+	defer func() {
+		if e := recover(); e != nil {
+			err, ok := e.(*Error)
+			if !ok {
+				panic(e)
+			}
+			rErr = err
+		}
+	}()
+	return o.object.Invoke(args...)
+}
+
 // New creates a new instance of this type object. This will fail if it not a function (constructor).
 func (o *Object) New(args ...interface{}) *Object { return o.object.New(args...) }
+
+// New2 creates a new instance of this type object. This will fail if it not a function (constructor).
+// If calling New throws a Javascript error, an *Error is returned.
+func (o *Object) New2(args ...interface{}) (_ *Object, rerr error) {
+	defer func() {
+		if e := recover(); e != nil {
+			err, ok := e.(*Error)
+			if !ok {
+				panic(e)
+			}
+			rErr = err
+		}
+	}()
+	return o.object.New(args...)
+}
 
 // Bool returns the object converted to bool according to JavaScript type conversions.
 func (o *Object) Bool() bool { return o.object.Bool() }
