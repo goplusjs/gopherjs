@@ -49,6 +49,21 @@ func (o *Object) SetIndex(i int, value interface{}) { o.object.SetIndex(i, value
 // Call calls the object's method with the given name.
 func (o *Object) Call(name string, args ...interface{}) *Object { return o.object.Call(name, args...) }
 
+// Call2 calls the object's method with the given name. If object's method throws a Javascript
+// error, an *Error is returned.
+func (o *Object) Call2(name string, args ...interface{}) (_ *Object, rErr error) {
+	defer func() {
+		if e := recover(); e != nil {
+			err, ok := e.(*Error)
+			if !ok {
+				panic(e)
+			}
+			rErr = err
+		}
+	}()
+	return o.object.Call(name, args...), nil
+}
+
 // Invoke calls the object itself. This will fail if it is not a function.
 func (o *Object) Invoke(args ...interface{}) *Object { return o.object.Invoke(args...) }
 
