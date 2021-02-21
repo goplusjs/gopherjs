@@ -101,7 +101,7 @@ type dceInfo struct {
 	methodFilter string
 }
 
-func WriteProgramCode(pkgs []*Archive, w *SourceMapFilter) error {
+func WriteProgramCode(pkgs []*Archive, w *SourceMapFilter) ([]*PkgInfo, error) {
 	mainPkg := pkgs[len(pkgs)-1]
 	minify := mainPkg.Minified
 
@@ -151,31 +151,51 @@ func WriteProgramCode(pkgs []*Archive, w *SourceMapFilter) error {
 	}
 
 	if _, err := w.Write([]byte("\"use strict\";\n(function() {\n\n")); err != nil {
-		return err
+		return nil, err
 	}
 	preludeJS := prelude.Prelude
 	if minify {
 		preludeJS = prelude.Minified
 	}
 	if _, err := io.WriteString(w, preludeJS); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := w.Write([]byte("\n")); err != nil {
-		return err
+		return nil, err
 	}
 
 	// write packages
+	offset := w.offset
+
+	var infos []*PkgInfo
+	infos = append(infos, &PkgInfo{
+		Name: "$prelude",
+		Size: w.offset,
+	})
 	for _, pkg := range pkgs {
 		if err := WritePkgCode(pkg, dceSelection, minify, w); err != nil {
-			return err
+			return nil, err
 		}
+		infos = append(infos, &PkgInfo{
+			Name:       pkg.Name,
+			ImportPath: pkg.ImportPath,
+			Imports:    pkg.Imports,
+			Size:       w.offset - offset,
+		})
+		offset = w.offset
 	}
 
 	if _, err := w.Write([]byte("$synthesizeMethods();\nvar $mainPkg = $packages[\"" + string(mainPkg.ImportPath) + "\"];\n$packages[\"runtime\"].$init();\n$go($mainPkg.$init, []);\n$flushConsole();\n\n}).call(this);\n")); err != nil {
-		return err
+		return nil, err
 	}
+	return infos, nil
+}
 
-	return nil
+type PkgInfo struct {
+	Name       string   `json:"Name"`
+	ImportPath string   `json:"ImportPath,omitempty"`
+	Imports    []string `json:"Imports,omitempty"`
+	Size       int64    `json:"Size"`
 }
 
 func WritePkgCode(pkg *Archive, dceSelection map[*Decl]struct{}, minify bool, w *SourceMapFilter) error {
@@ -259,7 +279,12 @@ type SourceMapFilter struct {
 	MappingCallback func(generatedLine, generatedColumn int, originalPos token.Position)
 	line            int
 	column          int
+	offset          int64
 	fileSet         *token.FileSet
+}
+
+func (f *SourceMapFilter) Offset() int64 {
+	return f.offset
 }
 
 func (f *SourceMapFilter) Write(p []byte) (n int, err error) {
@@ -273,6 +298,7 @@ func (f *SourceMapFilter) Write(p []byte) (n int, err error) {
 
 		n2, err = f.Writer.Write(w)
 		n += n2
+		f.offset += int64(n2)
 		for {
 			i := bytes.IndexByte(w, '\n')
 			if i == -1 {

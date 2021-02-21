@@ -2,6 +2,7 @@ package build
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/build"
@@ -486,8 +487,9 @@ type Options struct {
 	MapToLocalDisk bool
 	Minify         bool
 	Color          bool
-	BuildTags      []string
 	Rebuild        bool
+	Analyze        bool
+	BuildTags      []string
 }
 
 func (o *Options) PrintError(format string, a ...interface{}) {
@@ -973,7 +975,7 @@ func (s *Session) WriteCommandPackage(archive *compiler.Archive, pkgObj string) 
 		defer func() {
 			m.WriteTo(mapFile)
 			mapFile.Close()
-			fmt.Fprintf(codeFile, "//# sourceMappingURL=%s.map\n", filepath.Base(pkgObj))
+			fmt.Fprintf(sourceMapFilter.Writer, "//# sourceMappingURL=%s.map\n", filepath.Base(pkgObj))
 		}()
 
 		sourceMapFilter.MappingCallback = NewMappingCallback(m, s.options.GOROOT, s.options.GOPATH, s.options.MapToLocalDisk)
@@ -989,7 +991,17 @@ func (s *Session) WriteCommandPackage(archive *compiler.Archive, pkgObj string) 
 	if err != nil {
 		return err
 	}
-	return compiler.WriteProgramCode(deps, sourceMapFilter)
+	infos, err := compiler.WriteProgramCode(deps, sourceMapFilter)
+	if s.options.Analyze {
+		data, err := json.MarshalIndent(&infos, "", "\t")
+		if err != nil {
+			fmt.Println("json error", err)
+		} else {
+			fmt.Printf("anylize pkg: size %v\n", sourceMapFilter.Offset())
+			fmt.Println(string(data))
+		}
+	}
+	return err
 }
 
 func NewMappingCallback(m *sourcemap.Map, goroot, gopath string, localMap bool) func(generatedLine, generatedColumn int, originalPos token.Position) {

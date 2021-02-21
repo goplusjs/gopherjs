@@ -82,6 +82,7 @@ func main() {
 	compilerFlags.StringVar(&tags, "tags", "", "a list of build tags to consider satisfied during the build")
 	compilerFlags.BoolVar(&options.MapToLocalDisk, "localmap", false, "use local paths for sourcemap")
 	compilerFlags.BoolVarP(&options.Rebuild, "force", "a", false, "force rebuilding of packages that are already up-to-date")
+	compilerFlags.BoolVar(&options.Analyze, "analyze", false, "analyze build package's json info")
 
 	flagWatch := pflag.NewFlagSet("", 0)
 	flagWatch.BoolVarP(&options.Watch, "watch", "w", false, "watch for changes to the source files")
@@ -589,7 +590,7 @@ func (fs serveCommandFileSystem) Open(requestName string) (http.File, error) {
 				if err != nil {
 					return err
 				}
-				if err := compiler.WriteProgramCode(deps, sourceMapFilter); err != nil {
+				if _, err = compiler.WriteProgramCode(deps, sourceMapFilter); err != nil {
 					return err
 				}
 
