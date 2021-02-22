@@ -489,6 +489,7 @@ type Options struct {
 	Color          bool
 	Rebuild        bool
 	Analyze        bool
+	AnalyzeJson    bool
 	BuildTags      []string
 }
 
@@ -993,12 +994,22 @@ func (s *Session) WriteCommandPackage(archive *compiler.Archive, pkgObj string) 
 	}
 	infos, err := compiler.WriteProgramCode(deps, sourceMapFilter)
 	if s.options.Analyze {
-		data, err := json.MarshalIndent(&infos, "", "\t")
-		if err != nil {
-			fmt.Println("json error", err)
-		} else {
-			fmt.Printf("anylize pkg: size %v\n", sourceMapFilter.Offset())
+		if s.options.AnalyzeJson {
+			data, _ := json.MarshalIndent(&infos, "", "\t")
 			fmt.Println(string(data))
+		} else {
+			var maxSize int64
+			for _, info := range infos {
+				if info.Size > maxSize {
+					maxSize = info.Size
+				}
+			}
+			noff := len(strconv.FormatInt(maxSize, 10))
+			format := fmt.Sprintf("%%%vv\t%%v\n", noff)
+			fmt.Printf(format, "<Size>", "<ImportPath>")
+			for _, info := range infos {
+				fmt.Printf(format, info.Size, info.ImportPath)
+			}
 		}
 	}
 	return err

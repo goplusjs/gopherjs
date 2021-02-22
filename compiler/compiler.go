@@ -169,8 +169,9 @@ func WriteProgramCode(pkgs []*Archive, w *SourceMapFilter) ([]*PkgInfo, error) {
 
 	var infos []*PkgInfo
 	infos = append(infos, &PkgInfo{
-		Name: "$prelude",
-		Size: w.offset,
+		Name:       "$prelude",
+		ImportPath: "$prelude",
+		Size:       w.offset,
 	})
 	for _, pkg := range pkgs {
 		if err := WritePkgCode(pkg, dceSelection, minify, w); err != nil {

@@ -82,7 +82,8 @@ func main() {
 	compilerFlags.StringVar(&tags, "tags", "", "a list of build tags to consider satisfied during the build")
 	compilerFlags.BoolVar(&options.MapToLocalDisk, "localmap", false, "use local paths for sourcemap")
 	compilerFlags.BoolVarP(&options.Rebuild, "force", "a", false, "force rebuilding of packages that are already up-to-date")
-	compilerFlags.BoolVar(&options.Analyze, "analyze", false, "analyze build package's json info")
+	compilerFlags.BoolVar(&options.Analyze, "analyze", false, "print analyze build package's info")
+	compilerFlags.BoolVar(&options.AnalyzeJson, "json", false, "print analyze build package's json info")
 
 	flagWatch := pflag.NewFlagSet("", 0)
 	flagWatch.BoolVarP(&options.Watch, "watch", "w", false, "watch for changes to the source files")
