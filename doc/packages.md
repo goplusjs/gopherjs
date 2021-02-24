@@ -83,7 +83,7 @@ hash               |              |
 -- crc32           | ✅ yes       |
 -- crc64           | ✅ yes       |
 -- fnv             | ✅ yes       |
--- maphash         | ❌ no        |
+-- maphash         | ✅ yes       |
 html               | ✅ yes       |
 -- template        | ✅ yes       |
 image              | ✅ yes       |
@@ -128,7 +128,7 @@ os                 | ☑️ partially | node.js only
 path               | ✅ yes       |
 -- filepath        | ✅ yes       |
 plugin             | ❌ no        |
-reflect            | ✅ yes       | except StructOf (pending)
+reflect            | ✅ yes       |
 regexp             | ✅ yes       |
 -- syntax          | ✅ yes       |
 runtime            | ☑️ partially | SetMutexProfileFraction, SetFinalizer, ReadMemStats, Callers, CallersFrames unsupported
