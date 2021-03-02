@@ -406,7 +406,6 @@ var $methodSet = function(typ) {
   }
 
   var current = [{typ: isPtr ? typ.elem : typ, indirect: isPtr}];
-
   var seen = {};
   var check = {};
   while (current.length > 0) {
@@ -443,13 +442,13 @@ var $methodSet = function(typ) {
         });
         break;
 
-      case $kindInterface:
-        if (e.embedded) {
-          eset = eset.concat(e.typ.methods);
-        } else {
-          mset = mset.concat(e.typ.methods);
-        }
-        break;
+      // case $kindInterface:
+      //   if (e.embedded) {
+      //     eset = eset.concat(e.typ.methods);
+      //   } else {
+      //     mset = mset.concat(e.typ.methods);
+      //   }
+      //   break;
       }
     });
     mset.forEach(function(m) {
