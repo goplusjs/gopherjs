@@ -441,14 +441,6 @@ var $methodSet = function(typ) {
           }
         });
         break;
-
-      // case $kindInterface:
-      //   if (e.embedded) {
-      //     eset = eset.concat(e.typ.methods);
-      //   } else {
-      //     mset = mset.concat(e.typ.methods);
-      //   }
-      //   break;
       }
     });
     mset.forEach(function(m) {
