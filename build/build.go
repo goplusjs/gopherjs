@@ -368,6 +368,10 @@ func parseAndAugment(bctx *build.Context, pkg *build.Package, isTest bool, fileS
 		},
 	}
 
+	if importPath == "syscall" {
+		nativesContext.BuildTags = []string{runtime.GOARCH}
+	}
+
 	if nativesPkg, err := nativesContext.Import(importPath, "", 0); err == nil {
 		names := nativesPkg.GoFiles
 		if isTest {
