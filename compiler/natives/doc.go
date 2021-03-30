@@ -5,4 +5,6 @@
 // in src subfolder.
 package natives
 
+import _ "github.com/shurcooL/vfsgen"
+
 //go:generate vfsgendev -source="github.com/goplusjs/gopherjs/compiler/natives".FS -tag=gopherjsdev
