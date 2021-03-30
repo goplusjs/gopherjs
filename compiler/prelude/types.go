@@ -408,7 +408,7 @@ var $methodSet = function(typ) {
   var current = [{typ: isPtr ? typ.elem : typ, indirect: isPtr}];
 
   var seen = {};
-
+  var depth = 0;
   while (current.length > 0) {
     var next = [];
     var mset = [];
@@ -420,9 +420,17 @@ var $methodSet = function(typ) {
       seen[e.typ.string] = true;
 
       if (e.typ.named) {
-        mset = mset.concat(e.typ.methods);
+		var methods = []
+		e.typ.methods.forEach(function(m) {
+          methods.push({m:m, typ: $kindStruct, depth:depth});
+		})
+        mset = mset.concat(methods);
         if (e.indirect) {
-          mset = mset.concat($ptrType(e.typ).methods);
+		  var methods = [];
+          $ptrType(e.typ).methods.forEach(function(m) {
+            methods.push({m:m, typ: $kindStruct, depth: depth});
+          })
+          mset = mset.concat(methods);
         }
       }
 
@@ -438,23 +446,45 @@ var $methodSet = function(typ) {
         break;
 
       case $kindInterface:
-        mset = mset.concat(e.typ.methods);
+		var methods = [];
+		e.typ.methods.forEach(function(m) {
+          methods.push({m:m, typ: $kindInterface, depth: depth});
+		})
+        mset = mset.concat(methods);
         break;
       }
     });
 
-    mset.forEach(function(m) {
+    mset.forEach(function(item) {
+      var m = item.m, typ = item.typ;
       if (base[m.name] === undefined) {
-        base[m.name] = m;
+        base[m.name] = [item];
+      } else {
+		base[m.name].push(item);
       }
     });
 
+    depth++;
     current = next;
   }
 
+  var illegal = {};
+  Object.keys(base).forEach(function(name) {
+	var items = base[name];
+    var depth = items[0].depth;
+    var length = items.length;
+    for(var i=1; i<length; i++) {
+      if (depth === items[i].depth) {
+        illegal[name] = true;
+      }
+    }
+  })
+
   typ.methodSetCache = [];
   Object.keys(base).sort().forEach(function(name) {
-    typ.methodSetCache.push(base[name]);
+    if (illegal[name] === undefined) {
+       typ.methodSetCache.push(base[name][0].m);
+    }
   });
   return typ.methodSetCache;
 };
