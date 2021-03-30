@@ -837,8 +837,11 @@ func (s *Session) buildPackage(pkg *PackageData) (*compiler.Archive, error) {
 			if err != nil {
 				return nil, err
 			}
-			s.Archives[pkg.ImportPath] = archive
-			return archive, err
+
+			if archive.Version == goversion.Version {
+				s.Archives[pkg.ImportPath] = archive
+				return archive, nil
+			}
 		}
 	}
 
@@ -933,6 +936,7 @@ func (s *Session) writeLibraryPackage(archive *compiler.Archive, pkgObj string) 
 	}
 	defer objFile.Close()
 
+	archive.Version = goversion.Version
 	return compiler.WriteArchive(archive, objFile)
 }
 

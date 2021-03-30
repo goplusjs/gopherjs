@@ -33,6 +33,7 @@ func (err ErrorList) Error() string {
 type Archive struct {
 	ImportPath   string
 	Name         string
+	Version      string
 	Imports      []string
 	ExportData   []byte
 	Declarations []*Decl
