@@ -26,10 +26,15 @@ func buildReleaseTags(version int) (tags []string) {
 }
 
 func init() {
-	ver, ok := goversion.Installed()
+	ver, verinfo, ok := goversion.Installed()
 	if ok && ver.Major == 1 {
 		installReleaseTags = buildReleaseTags(ver.Minor)
 	} else {
 		installReleaseTags = build.Default.ReleaseTags
 	}
+	Version = verinfo
 }
+
+var (
+	Version string
+)

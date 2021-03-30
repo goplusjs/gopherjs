@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -215,6 +214,15 @@ func importWithSrcDir(bctx build.Context, path string, srcDir string, mode build
 	case "crypto/rand":
 		pkg.GoFiles = []string{"rand.go", "util.go"}
 		pkg.TestGoFiles = exclude(pkg.TestGoFiles, "rand_linux_test.go") // Don't want linux-specific tests (since linux-specific package files are excluded too).
+	case "crypto/x509":
+		var files []string
+		for _, v := range pkg.GoFiles {
+			if strings.HasPrefix(v, "root_") {
+				continue
+			}
+			files = append(files, v)
+		}
+		pkg.GoFiles = files
 	case "syscall":
 		pkg.GoFiles = exclude(pkg.GoFiles, "ptrace_ios.go")
 	}
@@ -359,6 +367,10 @@ func parseAndAugment(bctx *build.Context, pkg *build.Package, isTest bool, fileS
 		OpenFile: func(name string) (r io.ReadCloser, err error) {
 			return natives.FS.Open(name)
 		},
+	}
+
+	if importPath == "syscall" {
+		nativesContext.BuildTags = []string{runtime.GOARCH}
 	}
 
 	if nativesPkg, err := nativesContext.Import(importPath, "", 0); err == nil {
@@ -523,13 +535,15 @@ type linkname struct {
 }
 
 type Session struct {
-	options  *Options
-	bctx     *build.Context
-	mod      *fastmod.Package
-	Archives map[string]*compiler.Archive
-	Packages map[string]*PackageData
-	Types    map[string]*types.Package
-	Watcher  *fsnotify.Watcher
+	options          *Options
+	bctx             *build.Context
+	mod              *fastmod.Package
+	Archives         map[string]*compiler.Archive
+	Packages         map[string]*PackageData
+	Types            map[string]*types.Package
+	Watcher          *fsnotify.Watcher
+	compilePkg       string
+	compileLinkNames map[string][]compiler.LinkName
 }
 
 func (s *Session) checkMod(pkg *PackageData) (err error) {
@@ -553,9 +567,10 @@ func NewSession(options *Options) *Session {
 	options.Verbose = options.Verbose || options.Watch
 
 	s := &Session{
-		options:  options,
-		Archives: make(map[string]*compiler.Archive),
-		Packages: make(map[string]*PackageData),
+		options:          options,
+		Archives:         make(map[string]*compiler.Archive),
+		Packages:         make(map[string]*PackageData),
+		compileLinkNames: make(map[string][]compiler.LinkName),
 	}
 	s.bctx = NewBuildContext(s.InstallSuffix(), s.options.BuildTags)
 	s.mod = fastmod.NewPackage(s.bctx)
@@ -684,7 +699,7 @@ func (s *Session) BuildPackage(pkg *PackageData) (*compiler.Archive, error) {
 	return s.buildPackage(pkg)
 }
 
-func (s *Session) checkLinkNames(importPath string, fileSet *token.FileSet, files []*ast.File) (linknames []compiler.LinkName, linkfile *ast.File, err error) {
+func (s *Session) checkLinkNames(importPath string, fileSet *token.FileSet, files []*ast.File) (linknames []compiler.LinkName, err error) {
 	if importPath == "internal/bytealg" || importPath == "runtime" {
 		return
 	}
@@ -731,19 +746,12 @@ func (s *Session) checkLinkNames(importPath string, fileSet *token.FileSet, file
 		return
 	}
 	sort.Strings(linkImports)
-	var lines []string
-
-	var pkgName string
-	for _, f := range files {
-		if f.Name != nil {
-			pkgName = f.Name.Name
-			break
-		}
-	}
-
-	lines = append(lines, "package "+pkgName)
 
 	for _, im := range linkImports {
+		if s.compilePkg == im {
+			s.compileLinkNames[im] = linknames
+			continue
+		}
 		ar, ok := s.Archives[im]
 		if !ok {
 			ar, err = s.BuildImportPath(im)
@@ -751,32 +759,10 @@ func (s *Session) checkLinkNames(importPath string, fileSet *token.FileSet, file
 				return
 			}
 		}
-		lines = append(lines, "import _ \""+im+"\"")
-		for _, d := range ar.Declarations {
-			for _, link := range linknames {
-				if d.FullName == link.Target {
-					var fnName string
-					pos := bytes.Index(d.DeclCode, []byte("="))
-					if pos > 0 {
-						fnName = strings.TrimSpace(string(d.DeclCode[:pos]))
-					}
-					if ar.Minified {
-						d.DeclCode = append(d.DeclCode, []byte(fmt.Sprintf("$pkg.%v=%v;", link.TargetName, fnName))...)
-					} else {
-						d.DeclCode = append(d.DeclCode, []byte(fmt.Sprintf("\t$pkg.%v=%v;\n", link.TargetName, fnName))...)
-					}
-					break
-				}
-			}
-		}
+		compiler.UpdateLinkNames(ar, linknames)
 		if pkg, ok := s.Packages[im]; ok {
 			s.writeArchive(ar, pkg)
 		}
-	}
-	var f *ast.File
-	f, err = parser.ParseFile(fileSet, "_linkname.go", []byte(strings.Join(lines, "\n")+"\n"), 0)
-	if err == nil {
-		linkfile = f
 	}
 	return
 }
@@ -858,8 +844,11 @@ func (s *Session) buildPackage(pkg *PackageData) (*compiler.Archive, error) {
 			if err != nil {
 				return nil, err
 			}
-			s.Archives[pkg.ImportPath] = archive
-			return archive, err
+
+			if archive.Version == goversion.Version {
+				s.Archives[pkg.ImportPath] = archive
+				return archive, nil
+			}
 		}
 	}
 
@@ -891,17 +880,19 @@ func (s *Session) buildPackage(pkg *PackageData) (*compiler.Archive, error) {
 	if embedfile != nil {
 		files = append(files, embedfile)
 	}
-	linknames, linkfile, err := s.checkLinkNames(pkg.ImportPath, fileSet, files)
+
+	linknames, err := s.checkLinkNames(pkg.ImportPath, fileSet, files)
 	if err != nil {
 		return nil, err
 	}
-	if linkfile != nil {
-		files = append(files, linkfile)
-	}
-
+	s.compilePkg = pkg.ImportPath
+	s.compileLinkNames[pkg.ImportPath] = nil
 	archive, err := compiler.Compile(pkg.ImportPath, files, fileSet, importContext, linknames, s.options.Minify)
 	if err != nil {
 		return nil, err
+	}
+	if links := s.compileLinkNames[pkg.ImportPath]; links != nil {
+		compiler.UpdateLinkNames(archive, links)
 	}
 
 	for _, jsFile := range pkg.JSFiles {
@@ -952,6 +943,7 @@ func (s *Session) writeLibraryPackage(archive *compiler.Archive, pkgObj string) 
 	}
 	defer objFile.Close()
 
+	archive.Version = goversion.Version
 	return compiler.WriteArchive(archive, objFile)
 }
 
