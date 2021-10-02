@@ -134,7 +134,7 @@ func (c *funcContext) translateSelection(sel selection, pos token.Pos) ([]string
 	var fields []string
 	t := sel.Recv()
 	for _, index := range sel.Index() {
-		if ptr, isPtr := t.(*types.Pointer); isPtr {
+		if ptr, isPtr := t.Underlying().(*types.Pointer); isPtr {
 			t = ptr.Elem()
 		}
 		s := t.Underlying().(*types.Struct)
