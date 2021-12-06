@@ -17,10 +17,27 @@ import (
 	"golang.org/x/tools/go/types/typeutil"
 )
 
+// pkg.func
+// LinkName{
+// 	Target: "pkg.func"
+// 	TargetName: "__linkname__func"
+// 	TargetImportPath: "pkg"
+// }
+
+// pkg.(*recv).method
+// LinkName {
+// 	Target: "(*pkg.recv).method"
+// 	TargetName: "__linkname__recv_method"
+// 	TargetRecv: "*recv"
+// 	TargetMethod: "method"
+// 	TargetImportPath: "pkg"
+// }
 type LinkName struct {
 	Local            string
 	Target           string
 	TargetName       string
+	TargetRecv       string
+	TargetMethod     string
 	TargetImportPath string
 }
 
@@ -575,10 +592,14 @@ func UpdateLinkNames(ar *Archive, linknames []LinkName) {
 	for _, d := range ar.Declarations {
 		for _, link := range linknames {
 			if d.FullName == link.Target {
-				var fnName string
-				pos := bytes.Index(d.DeclCode, []byte("="))
-				if pos > 0 {
-					fnName = strings.TrimSpace(string(d.DeclCode[:pos]))
+				fnName := link.TargetName
+				if link.TargetMethod != "" {
+					fnName = fmt.Sprintf("function(s) { return s.%v(...[...arguments].slice(1))}", link.TargetMethod)
+				} else {
+					pos := bytes.Index(d.DeclCode, []byte("="))
+					if pos > 0 {
+						fnName = strings.TrimSpace(string(d.DeclCode[:pos]))
+					}
 				}
 				if ar.Minified {
 					d.DeclCode = append(d.DeclCode, []byte(fmt.Sprintf("$pkg.%v=%v;", link.TargetName, fnName))...)

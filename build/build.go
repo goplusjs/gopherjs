@@ -703,21 +703,40 @@ func (s *Session) checkLinkNames(importPath string, fileSet *token.FileSet, file
 	for _, f := range files {
 		for _, group := range f.Comments {
 			for _, c := range group.List {
+				// method //go:linkname _Println fmt.Println
+				// method //go:linkname _WriteString bytes.(*Buffer).WriteString
 				if strings.HasPrefix(c.Text, "//go:linkname ") {
 					f := strings.Fields(c.Text)
 					var target string
 					if len(f) == 3 {
 						target = f[2]
 					}
-					var targetName, targetImportPath string
+					var targetName, targetRecv, targetMethod, targetImportPath string
 					pos := strings.LastIndex(target, ".")
 					if pos > 0 {
-						targetImportPath = target[:pos]
-						targetName = target[pos+1:]
+						if target[pos-1] == ')' {
+							pos2 := strings.Index(target, "(")
+							if pos2 == -1 {
+								return nil, fmt.Errorf("relocation target %v not defined", target)
+							}
+							targetImportPath = target[:pos2-1]
+							targetMethod = target[pos+1:]
+							targetRecv = target[pos2+1 : pos-1]
+							recv := strings.Trim(targetRecv, "*")
+							targetName = "__linkname__" + recv + "_" + targetMethod
+							if strings.HasPrefix(targetRecv, "*") {
+								target = "(*" + targetImportPath + "." + recv + ")." + targetMethod
+							} else {
+								target = "(" + targetImportPath + "." + recv + ")." + targetMethod
+							}
+						} else {
+							targetImportPath = target[:pos]
+							targetName = "__linkname__" + target[pos+1:]
+						}
 					} else {
 						targetName = target
 					}
-					linknames = append(linknames, compiler.LinkName{Local: f[1], Target: target, TargetName: targetName, TargetImportPath: targetImportPath})
+					linknames = append(linknames, compiler.LinkName{Local: f[1], Target: target, TargetName: targetName, TargetRecv: targetRecv, TargetMethod: targetMethod, TargetImportPath: targetImportPath})
 				}
 			}
 		}
