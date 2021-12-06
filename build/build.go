@@ -703,21 +703,45 @@ func (s *Session) checkLinkNames(importPath string, fileSet *token.FileSet, file
 	for _, f := range files {
 		for _, group := range f.Comments {
 			for _, c := range group.List {
+				// method //go:linkname _Println fmt.Println
+				// method //go:linkname _WriteString bytes.(*Buffer).WriteString
 				if strings.HasPrefix(c.Text, "//go:linkname ") {
 					f := strings.Fields(c.Text)
 					var target string
 					if len(f) == 3 {
 						target = f[2]
 					}
-					var targetName, targetImportPath string
-					pos := strings.LastIndex(target, ".")
+					var targetName, targetRecv, targetMethod, targetImportPath string
+					pos := strings.Index(target, ".")
 					if pos > 0 {
+						// pkg.func
+						// pkg.recv.method
+						// pkg.(*recv).method
 						targetImportPath = target[:pos]
-						targetName = target[pos+1:]
+						fnname := target[pos+1:]
+						pos = strings.Index(fnname, ".")
+						if pos > 0 {
+							if fnname[0] == '(' {
+								if fnname[1] != '*' || fnname[pos-1] != ')' {
+									return nil, fmt.Errorf("relocation target %v not defined", target)
+								}
+								targetRecv = fnname[1 : pos-1]
+								targetMethod = fnname[pos+1:]
+								targetName = "__linkname__" + targetRecv[1:] + "_" + targetMethod
+								target = "(*" + targetImportPath + "." + targetRecv[1:] + ")." + targetMethod
+							} else {
+								targetRecv = fnname[:pos]
+								targetMethod = fnname[pos+1:]
+								targetName = "__linkname__" + targetRecv + "_" + targetMethod
+								target = "(" + targetImportPath + "." + targetRecv + ")." + targetMethod
+							}
+						} else {
+							targetName = "__linkname__" + fnname
+						}
 					} else {
 						targetName = target
 					}
-					linknames = append(linknames, compiler.LinkName{Local: f[1], Target: target, TargetName: targetName, TargetImportPath: targetImportPath})
+					linknames = append(linknames, compiler.LinkName{Local: f[1], Target: target, TargetName: targetName, TargetRecv: targetRecv, TargetMethod: targetMethod, TargetImportPath: targetImportPath})
 				}
 			}
 		}
