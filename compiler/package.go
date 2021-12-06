@@ -17,30 +17,35 @@ import (
 	"golang.org/x/tools/go/types/typeutil"
 )
 
-// pkg.func
-// LinkName{
-// 	Target: "pkg.func"
-// 	TargetName: "__linkname__func"
-// 	TargetImportPath: "pkg"
-// }
-//
-// pkg.recv.method
-// LinkName {
-// 	Target: "pkg.recv.method"
-// 	TargetName: "__linkname__recv_method"
-// 	TargetRecv: "recv"
-// 	TargetMethod: "method"
-// 	TargetImportPath: "pkg"
-// }
-//
-// pkg.(*recv).method
-// LinkName {
-// 	Target: "(*pkg.recv).method"
-// 	TargetName: "__linkname__recv_method"
-// 	TargetRecv: "*recv"
-// 	TargetMethod: "method"
-// 	TargetImportPath: "pkg"
-// }
+/*
+go:linkname
+
+pkg.func
+LinkName{
+	Target: "pkg.func"
+	TargetName: "__linkname__func"
+	TargetImportPath: "pkg"
+}
+
+pkg.recv.method
+LinkName {
+	Target: "(pkg.recv).method"
+	TargetName: "__linkname__recv_method"
+	TargetRecv: "recv"
+	TargetMethod: "method"
+	TargetImportPath: "pkg"
+}
+
+pkg.(*recv).method
+LinkName {
+	Target: "(*pkg.recv).method"
+	TargetName: "__linkname__recv_method"
+	TargetRecv: "*recv"
+	TargetMethod: "method"
+	TargetImportPath: "pkg"
+}
+*/
+
 type LinkName struct {
 	Local            string
 	Target           string
