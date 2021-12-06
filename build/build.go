@@ -712,26 +712,31 @@ func (s *Session) checkLinkNames(importPath string, fileSet *token.FileSet, file
 						target = f[2]
 					}
 					var targetName, targetRecv, targetMethod, targetImportPath string
-					pos := strings.LastIndex(target, ".")
+					pos := strings.Index(target, ".")
 					if pos > 0 {
-						if target[pos-1] == ')' {
-							pos2 := strings.Index(target, "(")
-							if pos2 == -1 {
-								return nil, fmt.Errorf("relocation target %v not defined", target)
-							}
-							targetImportPath = target[:pos2-1]
-							targetMethod = target[pos+1:]
-							targetRecv = target[pos2+1 : pos-1]
-							recv := strings.Trim(targetRecv, "*")
-							targetName = "__linkname__" + recv + "_" + targetMethod
-							if strings.HasPrefix(targetRecv, "*") {
-								target = "(*" + targetImportPath + "." + recv + ")." + targetMethod
+						// pkg.func
+						// pkg.recv.method
+						// pkg.(*recv).method
+						targetImportPath = target[:pos]
+						fnname := target[pos+1:]
+						pos = strings.Index(fnname, ".")
+						if pos > 0 {
+							if fnname[0] == '(' {
+								if fnname[1] != '*' || fnname[pos-1] != ')' {
+									return nil, fmt.Errorf("relocation target %v not defined", target)
+								}
+								targetRecv = fnname[1 : pos-1]
+								targetMethod = fnname[pos+1:]
+								targetName = "__linkname__" + targetRecv[1:] + "_" + targetMethod
+								target = "(*" + targetImportPath + "." + targetRecv[1:] + ")." + targetMethod
 							} else {
-								target = "(" + targetImportPath + "." + recv + ")." + targetMethod
+								targetRecv = fnname[:pos]
+								targetMethod = fnname[pos+1:]
+								targetName = "__linkname__" + targetRecv + "_" + targetMethod
+								target = "(" + targetImportPath + "." + targetRecv + ")." + targetMethod
 							}
 						} else {
-							targetImportPath = target[:pos]
-							targetName = "__linkname__" + target[pos+1:]
+							targetName = "__linkname__" + fnname
 						}
 					} else {
 						targetName = target

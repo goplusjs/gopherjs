@@ -23,7 +23,16 @@ import (
 // 	TargetName: "__linkname__func"
 // 	TargetImportPath: "pkg"
 // }
-
+//
+// pkg.recv.method
+// LinkName {
+// 	Target: "pkg.recv.method"
+// 	TargetName: "__linkname__recv_method"
+// 	TargetRecv: "recv"
+// 	TargetMethod: "method"
+// 	TargetImportPath: "pkg"
+// }
+//
 // pkg.(*recv).method
 // LinkName {
 // 	Target: "(*pkg.recv).method"
@@ -594,9 +603,15 @@ func UpdateLinkNames(ar *Archive, linknames []LinkName) {
 			if d.FullName == link.Target {
 				fnName := link.TargetName
 				if link.TargetMethod != "" {
-					fnName = fmt.Sprintf("function(s) { return s.%v(...[...arguments].slice(1))}", link.TargetMethod)
+					if link.TargetRecv[0] == '*' {
+						fnName = fmt.Sprintf("function(s) { return s.%v(...[...arguments].slice(1))}", link.TargetMethod)
+					} else {
+						pos := bytes.Index(d.DeclCode, []byte{'.'})
+						recv := strings.TrimSpace(string(d.DeclCode[:pos]))
+						fnName = fmt.Sprintf("function(s) { return $clone(s, %v).%v(...[...arguments].slice(1))}", recv, link.TargetMethod)
+					}
 				} else {
-					pos := bytes.Index(d.DeclCode, []byte("="))
+					pos := bytes.Index(d.DeclCode, []byte{'='})
 					if pos > 0 {
 						fnName = strings.TrimSpace(string(d.DeclCode[:pos]))
 					}
