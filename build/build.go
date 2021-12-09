@@ -1,6 +1,7 @@
 package build
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/build"
@@ -498,8 +499,10 @@ type Options struct {
 	MapToLocalDisk bool
 	Minify         bool
 	Color          bool
-	BuildTags      []string
 	Rebuild        bool
+	Analyze        bool
+	AnalyzeJson    bool
+	BuildTags      []string
 }
 
 func (o *Options) PrintError(format string, a ...interface{}) {
@@ -989,7 +992,7 @@ func (s *Session) WriteCommandPackage(archive *compiler.Archive, pkgObj string) 
 		defer func() {
 			m.WriteTo(mapFile)
 			mapFile.Close()
-			fmt.Fprintf(codeFile, "//# sourceMappingURL=%s.map\n", filepath.Base(pkgObj))
+			fmt.Fprintf(sourceMapFilter.Writer, "//# sourceMappingURL=%s.map\n", filepath.Base(pkgObj))
 		}()
 
 		sourceMapFilter.MappingCallback = NewMappingCallback(m, s.options.GOROOT, s.options.GOPATH, s.options.MapToLocalDisk)
@@ -1005,7 +1008,27 @@ func (s *Session) WriteCommandPackage(archive *compiler.Archive, pkgObj string) 
 	if err != nil {
 		return err
 	}
-	return compiler.WriteProgramCode(deps, sourceMapFilter)
+	infos, err := compiler.WriteProgramCode(deps, sourceMapFilter)
+	if s.options.Analyze {
+		if s.options.AnalyzeJson {
+			data, _ := json.MarshalIndent(&infos, "", "\t")
+			fmt.Println(string(data))
+		} else {
+			var maxSize int64
+			for _, info := range infos {
+				if info.Size > maxSize {
+					maxSize = info.Size
+				}
+			}
+			noff := len(strconv.FormatInt(maxSize, 10))
+			format := fmt.Sprintf("%%%vv\t%%v\n", noff)
+			fmt.Printf(format, "<Size>", "<ImportPath>")
+			for _, info := range infos {
+				fmt.Printf(format, info.Size, info.ImportPath)
+			}
+		}
+	}
+	return err
 }
 
 func NewMappingCallback(m *sourcemap.Map, goroot, gopath string, localMap bool) func(generatedLine, generatedColumn int, originalPos token.Position) {
