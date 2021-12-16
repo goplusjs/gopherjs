@@ -406,23 +406,28 @@ var $methodSet = function(typ) {
   }
 
   var current = [{typ: isPtr ? typ.elem : typ, indirect: isPtr}];
-
   var seen = {};
-
+  var check = {};
   while (current.length > 0) {
     var next = [];
     var mset = [];
-
+    var eset = [];
     current.forEach(function(e) {
       if (seen[e.typ.string]) {
         return;
       }
       seen[e.typ.string] = true;
-
       if (e.typ.named) {
-        mset = mset.concat(e.typ.methods);
-        if (e.indirect) {
-          mset = mset.concat($ptrType(e.typ).methods);
+        if (e.embedded) {
+          eset = eset.concat(e.typ.methods);
+          if (e.indirect) {
+            eset = eset.concat($ptrType(e.typ).methods);
+          }
+        } else {
+          mset = mset.concat(e.typ.methods);
+          if (e.indirect) {
+            mset = mset.concat($ptrType(e.typ).methods);
+          }
         }
       }
 
@@ -432,28 +437,31 @@ var $methodSet = function(typ) {
           if (f.embedded) {
             var fTyp = f.typ;
             var fIsPtr = (fTyp.kind === $kindPtr);
-            next.push({typ: fIsPtr ? fTyp.elem : fTyp, indirect: e.indirect || fIsPtr});
+            next.push({embedded:true, typ: fIsPtr ? fTyp.elem : fTyp, indirect: e.indirect || fIsPtr});
           }
         });
         break;
-
-      case $kindInterface:
-        mset = mset.concat(e.typ.methods);
-        break;
       }
     });
-
     mset.forEach(function(m) {
       if (base[m.name] === undefined) {
         base[m.name] = m;
+        check[m.name] = true;
       }
     });
-
+    eset.forEach(function(m) {
+      if (base[m.name] === undefined) {
+        base[m.name] = m;
+      } else if (check[m.name] != true) {
+        check[m.name] = false;
+      }
+    });
     current = next;
   }
 
   typ.methodSetCache = [];
   Object.keys(base).sort().forEach(function(name) {
+    if (check[name] == false) { return; }
     typ.methodSetCache.push(base[name]);
   });
   return typ.methodSetCache;
