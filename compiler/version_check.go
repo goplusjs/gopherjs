@@ -1,5 +1,5 @@
-//go:build go1.18
-// +build go1.18
+//go:build go1.16 && !go1.19
+// +build go1.16,!go1.19
 
 package compiler
 
@@ -8,15 +8,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
 
 // Version is the GopherJS compiler version string.
-const Version = "1.18.0+go1.18.5"
+var Version = runtime.Version()
 
 // GoVersion is the current Go 1.x version that GopherJS is compatible with.
-const GoVersion = 18
+var GoVersion = runtime.Version()[:6]
 
 // CheckGoVersion checks the version of the Go distribution
 // at goroot, and reports an error if it's not compatible
@@ -29,8 +30,8 @@ func CheckGoVersion(goroot string) error {
 	if err != nil {
 		return fmt.Errorf("unable to detect Go version for %q: %w", goroot, err)
 	}
-	if !strings.HasPrefix(v, "go1."+strconv.Itoa(GoVersion)) {
-		return fmt.Errorf("GopherJS %s requires a Go 1.%d.x distribution, but found version %s", Version, GoVersion, v)
+	if !strings.HasPrefix(v, GoVersion) {
+		return fmt.Errorf("GopherJS %s requires a %v distribution, but found version %s", Version, GoVersion, v)
 	}
 	return nil
 }
@@ -68,13 +69,6 @@ func GoRelease(goroot string) string {
 		return v
 	}
 
-	// Use Go version GopherJS release was tested against as a fallback. By
-	// convention, it is included in the GopherJS version after the plus sign.
-	parts := strings.Split(Version, "+")
-	if len(parts) == 2 {
-		return parts[1]
-	}
-
 	// If everything else fails, return just the Go version without patch level.
-	return fmt.Sprintf("go1.%d", GoVersion)
+	return GoVersion
 }

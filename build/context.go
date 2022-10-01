@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	_ "github.com/gopherjs/gopherjs/build/versionhack" // go/build release tags hack.
-	"github.com/gopherjs/gopherjs/compiler"
 	"github.com/gopherjs/gopherjs/compiler/gopherjspkg"
 	"github.com/gopherjs/gopherjs/compiler/natives"
 	"golang.org/x/tools/go/buildutil"
@@ -345,7 +344,7 @@ func goCtx(e Env) *simpleCtx {
 			// based on the Go tool's version.
 			//
 			// See also comments to the versionhack package.
-			ReleaseTags: build.Default.ReleaseTags[:compiler.GoVersion],
+			ReleaseTags: build.Default.ReleaseTags, //[:compiler.GoVersion],
 		},
 	}
 	return &gc

@@ -269,7 +269,7 @@ func parseAndAugment(xctx XContext, pkg *PackageData, isTest bool, fileSet *toke
 						if replacedDeclNames[s.Name.Name] {
 							s.Name = ast.NewIdent("_")
 							s.Type = &ast.StructType{Struct: s.Pos(), Fields: &ast.FieldList{}}
-							s.TypeParams = nil
+							// s.TypeParams = nil
 						}
 					}
 				case token.VAR, token.CONST:
@@ -696,6 +696,7 @@ func (s *Session) BuildPackage(pkg *PackageData) (*compiler.Archive, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	embed, err := embedFiles(pkg, fileSet, files)
 	if err != nil {
 		return nil, err

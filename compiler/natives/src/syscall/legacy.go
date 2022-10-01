@@ -1,4 +1,5 @@
 //go:build legacy_syscall
+// +build legacy_syscall
 
 package syscall
 

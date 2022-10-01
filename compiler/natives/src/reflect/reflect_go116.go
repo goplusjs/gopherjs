@@ -1,9 +1,11 @@
-//go:build js && go1.18
-// +build js,go1.18
+//go:build js && !go1.17
+// +build js,!go1.17
 
-package reflectlite
+package reflect
 
 import (
+	"errors"
+	"strconv"
 	"unsafe"
 
 	"github.com/gopherjs/gopherjs/js"
@@ -32,30 +34,19 @@ func init() {
 	uint8Type = TypeOf(uint8(0)).(*rtype) // set for real
 }
 
-var (
-	uint8Type *rtype
-)
-
-var (
-	idJsType      = "_jsType"
-	idReflectType = "_reflectType"
-	idKindType    = "kindType"
-	idRtype       = "_rtype"
-)
-
 func jsType(typ Type) *js.Object {
-	return js.InternalObject(typ).Get(idJsType)
+	return js.InternalObject(typ).Get("jsType")
 }
 
 func reflectType(typ *js.Object) *rtype {
-	if typ.Get(idReflectType) == js.Undefined {
+	if typ.Get("reflectType") == js.Undefined {
 		rt := &rtype{
 			size: uintptr(typ.Get("size").Int()),
 			kind: uint8(typ.Get("kind").Int()),
 			str:  newNameOff(newName(internalStr(typ.Get("string")), "", typ.Get("exported").Bool())),
 		}
-		js.InternalObject(rt).Set(idJsType, typ)
-		typ.Set(idReflectType, js.InternalObject(rt))
+		js.InternalObject(rt).Set("jsType", typ)
+		typ.Set("reflectType", js.InternalObject(rt))
 
 		methodSet := js.Global.Call("$methodSet", typ)
 		if methodSet.Length() != 0 || typ.Get("named").Bool() {
@@ -94,7 +85,7 @@ func reflectType(typ *js.Object) *rtype {
 				_methods: reflectMethods,
 			}
 			uncommonTypeMap[rt] = ut
-			js.InternalObject(ut).Set(idJsType, typ)
+			js.InternalObject(ut).Set("jsType", typ)
 		}
 
 		switch rt.Kind() {
@@ -188,12 +179,12 @@ func reflectType(typ *js.Object) *rtype {
 		}
 	}
 
-	return (*rtype)(unsafe.Pointer(typ.Get(idReflectType).Unsafe()))
+	return (*rtype)(unsafe.Pointer(typ.Get("reflectType").Unsafe()))
 }
 
 func setKindType(rt *rtype, kindType interface{}) {
-	js.InternalObject(rt).Set(idKindType, js.InternalObject(kindType))
-	js.InternalObject(kindType).Set(idRtype, js.InternalObject(rt))
+	js.InternalObject(rt).Set("kindType", js.InternalObject(kindType))
+	js.InternalObject(kindType).Set("rtype", js.InternalObject(rt))
 }
 
 type uncommonType struct {
@@ -287,6 +278,15 @@ func newTypeOff(t *rtype) typeOff {
 	i := len(typeOffList)
 	typeOffList = append(typeOffList, t)
 	return typeOff(i)
+}
+
+// addReflectOff adds a pointer to the reflection lookup map in the runtime.
+// It returns a new ID that can be used as a typeOff or textOff, and will
+// be resolved correctly. Implemented in the runtime package.
+func addReflectOff(ptr unsafe.Pointer) int32 {
+	i := len(typeOffList)
+	typeOffList = append(typeOffList, (*rtype)(ptr))
+	return int32(i)
 }
 
 func internalStr(strObj *js.Object) string {
@@ -390,6 +390,96 @@ func SliceOf(t Type) Type {
 	return reflectType(js.Global.Call("$sliceType", jsType(t)))
 }
 
+func StructOf(fields []StructField) Type {
+	var (
+		jsFields  = make([]*js.Object, len(fields))
+		fset      = map[string]struct{}{}
+		pkgpath   string
+		hasGCProg bool
+	)
+	for i, field := range fields {
+		if field.Name == "" {
+			panic("reflect.StructOf: field " + strconv.Itoa(i) + " has no name")
+		}
+		if !isValidFieldName(field.Name) {
+			panic("reflect.StructOf: field " + strconv.Itoa(i) + " has invalid name")
+		}
+		if field.Type == nil {
+			panic("reflect.StructOf: field " + strconv.Itoa(i) + " has no type")
+		}
+		f, fpkgpath := runtimeStructField(field)
+		ft := f.typ
+		if ft.kind&kindGCProg != 0 {
+			hasGCProg = true
+		}
+		if fpkgpath != "" {
+			if pkgpath == "" {
+				pkgpath = fpkgpath
+			} else if pkgpath != fpkgpath {
+				panic("reflect.Struct: fields with different PkgPath " + pkgpath + " and " + fpkgpath)
+			}
+		}
+		name := field.Name
+		if f.embedded() {
+			// Embedded field
+			if field.Type.Kind() == Ptr {
+				// Embedded ** and *interface{} are illegal
+				elem := field.Type.Elem()
+				if k := elem.Kind(); k == Ptr || k == Interface {
+					panic("reflect.StructOf: illegal anonymous field type " + field.Type.String())
+				}
+			}
+			switch field.Type.Kind() {
+			case Interface:
+			case Ptr:
+				ptr := (*ptrType)(unsafe.Pointer(ft))
+				if unt := ptr.uncommon(); unt != nil {
+					if i > 0 && unt.mcount > 0 {
+						// Issue 15924.
+						panic("reflect: embedded type with methods not implemented if type is not first field")
+					}
+					if len(fields) > 1 {
+						panic("reflect: embedded type with methods not implemented if there is more than one field")
+					}
+				}
+			default:
+				if unt := ft.uncommon(); unt != nil {
+					if i > 0 && unt.mcount > 0 {
+						// Issue 15924.
+						panic("reflect: embedded type with methods not implemented if type is not first field")
+					}
+					if len(fields) > 1 && ft.kind&kindDirectIface != 0 {
+						panic("reflect: embedded type with methods not implemented for non-pointer type")
+					}
+				}
+			}
+		}
+
+		if _, dup := fset[name]; dup {
+			panic("reflect.StructOf: duplicate field " + name)
+		}
+		fset[name] = struct{}{}
+		// To be consistent with Compiler's behavior we need to avoid externalizing
+		// the "name" property. The line below is effectively an inverse of the
+		// internalStr() function.
+		jsf := js.InternalObject(struct{ name string }{name})
+		// The rest is set through the js.Object() interface, which the compiler will
+		// externalize for us.
+		jsf.Set("prop", name)
+		jsf.Set("exported", f.name.isExported())
+		jsf.Set("typ", jsType(field.Type))
+		jsf.Set("tag", field.Tag)
+		jsf.Set("embedded", field.Anonymous)
+		jsFields[i] = jsf
+	}
+	_ = hasGCProg
+	typ := js.Global.Call("$structType", "", jsFields)
+	if pkgpath != "" {
+		typ.Set("pkgPath", pkgpath)
+	}
+	return reflectType(typ)
+}
+
 func Zero(typ Type) Value {
 	return makeValue(typ, jsType(typ).Call("zero"), 0)
 }
@@ -438,12 +528,27 @@ func MakeFunc(typ Type, fn func(args []Value) (results []Value)) Value {
 	ftyp := (*funcType)(unsafe.Pointer(t))
 
 	fv := js.MakeFunc(func(this *js.Object, arguments []*js.Object) interface{} {
+		// Convert raw JS arguments into []Value the user-supplied function expects.
 		args := make([]Value, ftyp.NumIn())
 		for i := range args {
 			argType := ftyp.In(i).common()
 			args[i] = makeValue(argType, arguments[i], 0)
 		}
+
+		// Call the user-supplied function.
 		resultsSlice := fn(args)
+
+		// Verify that returned value types are compatible with the function type specified by the caller.
+		if want, got := ftyp.NumOut(), len(resultsSlice); want != got {
+			panic("reflect: expected " + strconv.Itoa(want) + " return values, got " + strconv.Itoa(got))
+		}
+		for i, rtyp := range ftyp.out() {
+			if !resultsSlice[i].Type().AssignableTo(rtyp) {
+				panic("reflect: " + strconv.Itoa(i) + " return value type is not compatible with the function declaration")
+			}
+		}
+
+		// Rearrange return values according to the expected function signature.
 		switch ftyp.NumOut() {
 		case 0:
 			return nil
@@ -475,7 +580,7 @@ func makechan(typ *rtype, size int) (ch unsafe.Pointer) {
 }
 
 func makemap(t *rtype, cap int) (m unsafe.Pointer) {
-	return unsafe.Pointer(js.Global.Get("Map").New().Unsafe())
+	return unsafe.Pointer(js.Global.Get("Object").New().Unsafe())
 }
 
 func keyFor(t *rtype, key unsafe.Pointer) (*js.Object, string) {
@@ -489,7 +594,7 @@ func keyFor(t *rtype, key unsafe.Pointer) (*js.Object, string) {
 
 func mapaccess(t *rtype, m, key unsafe.Pointer) unsafe.Pointer {
 	_, k := keyFor(t, key)
-	entry := js.InternalObject(m).Call("get", k)
+	entry := js.InternalObject(m).Get(k)
 	if entry == js.Undefined {
 		return nil
 	}
@@ -508,12 +613,12 @@ func mapassign(t *rtype, m, key, val unsafe.Pointer) {
 	entry := js.Global.Get("Object").New()
 	entry.Set("k", kv)
 	entry.Set("v", jsVal)
-	js.InternalObject(m).Call("set", k, entry)
+	js.InternalObject(m).Set(k, entry)
 }
 
 func mapdelete(t *rtype, m unsafe.Pointer, key unsafe.Pointer) {
 	_, k := keyFor(t, key)
-	js.InternalObject(m).Call("delete", k)
+	js.InternalObject(m).Delete(k)
 }
 
 type mapIter struct {
@@ -531,7 +636,7 @@ type mapIter struct {
 func (iter *mapIter) skipUntilValidKey() {
 	for iter.i < iter.keys.Length() {
 		k := iter.keys.Index(iter.i)
-		if iter.m.Call("get", k) != js.Undefined {
+		if iter.m.Get(k.String()) != js.Undefined {
 			break
 		}
 		// The key is already deleted. Move on the next item.
@@ -540,12 +645,7 @@ func (iter *mapIter) skipUntilValidKey() {
 }
 
 func mapiterinit(t *rtype, m unsafe.Pointer) unsafe.Pointer {
-	return unsafe.Pointer(&mapIter{t, js.InternalObject(m), js.Global.Get("Array").Call("from", js.InternalObject(m).Call("keys")), 0, nil})
-}
-
-type TypeEx interface {
-	Type
-	Key() Type
+	return unsafe.Pointer(&mapIter{t, js.InternalObject(m), js.Global.Call("$keys", js.InternalObject(m)), 0, nil})
 }
 
 func mapiterkey(it unsafe.Pointer) unsafe.Pointer {
@@ -559,12 +659,29 @@ func mapiterkey(it unsafe.Pointer) unsafe.Pointer {
 			return nil
 		}
 		k := iter.keys.Index(iter.i)
-		kv = iter.m.Call("get", k)
+		kv = iter.m.Get(k.String())
 
 		// Record the key-value pair for later accesses.
 		iter.last = kv
 	}
-	return unsafe.Pointer(js.Global.Call("$newDataPointer", kv.Get("k"), jsType(PtrTo(iter.t.(TypeEx).Key()))).Unsafe())
+	return unsafe.Pointer(js.Global.Call("$newDataPointer", kv.Get("k"), jsType(PtrTo(iter.t.Key()))).Unsafe())
+}
+
+func mapiterelem(it unsafe.Pointer) unsafe.Pointer {
+	iter := (*mapIter)(it)
+	var kv *js.Object
+	if iter.last != nil {
+		kv = iter.last
+	} else {
+		iter.skipUntilValidKey()
+		if iter.i == iter.keys.Length() {
+			return nil
+		}
+		k := iter.keys.Index(iter.i)
+		kv = iter.m.Get(k.String())
+		iter.last = kv
+	}
+	return unsafe.Pointer(js.Global.Call("$newDataPointer", kv.Get("v"), jsType(PtrTo(iter.t.Elem()))).Unsafe())
 }
 
 func mapiternext(it unsafe.Pointer) {
@@ -574,7 +691,7 @@ func mapiternext(it unsafe.Pointer) {
 }
 
 func maplen(m unsafe.Pointer) int {
-	return js.InternalObject(m).Get("size").Int()
+	return js.Global.Call("$keys", js.InternalObject(m)).Length()
 }
 
 func cvtDirect(v Value, typ Type) Value {
@@ -605,7 +722,7 @@ func cvtDirect(v Value, typ Type) Value {
 	case Struct:
 		val = jsType(typ).Get("ptr").New()
 		copyStruct(val, srcVal, typ)
-	case Array, Bool, Chan, Func, Interface, Map, String:
+	case Array, Bool, Chan, Func, Interface, Map, String, UnsafePointer:
 		val = js.InternalObject(v.ptr)
 	default:
 		panic(&ValueError{"reflect.Convert", k})
@@ -686,21 +803,18 @@ func methodReceiver(op string, v Value, i int) (_ *rtype, t *funcType, fn unsafe
 	return
 }
 
-func valueInterface(v Value) interface{} {
+func valueInterface(v Value, safe bool) interface{} {
 	if v.flag == 0 {
 		panic(&ValueError{"reflect.Value.Interface", 0})
 	}
-
+	if safe && v.flag&flagRO != 0 {
+		panic("reflect.Value.Interface: cannot return value obtained from unexported field or method")
+	}
 	if v.flag&flagMethod != 0 {
 		v = makeMethodValue("Interface", v)
 	}
 
 	if isWrapped(v.typ) {
-		if v.flag&flagIndir != 0 && v.Kind() == Struct {
-			cv := jsType(v.typ).Call("zero")
-			copyStruct(cv, v.object(), v.typ)
-			return interface{}(unsafe.Pointer(jsType(v.typ).New(cv).Unsafe()))
-		}
 		return interface{}(unsafe.Pointer(jsType(v.typ).New(v.object()).Unsafe()))
 	}
 	return interface{}(unsafe.Pointer(v.object().Unsafe()))
@@ -708,10 +822,6 @@ func valueInterface(v Value) interface{} {
 
 func ifaceE2I(t *rtype, src interface{}, dst unsafe.Pointer) {
 	js.InternalObject(dst).Call("$set", js.InternalObject(src))
-}
-
-func methodName() string {
-	return "?FIXME?"
 }
 
 func makeMethodValue(op string, v Value) Value {
@@ -730,6 +840,242 @@ func makeMethodValue(op string, v Value) Value {
 	return Value{v.Type().common(), unsafe.Pointer(fv.Unsafe()), v.flag.ro() | flag(Func)}
 }
 
+func (t *rtype) pointers() bool {
+	switch t.Kind() {
+	case Ptr, Map, Chan, Func, Struct, Array:
+		return true
+	default:
+		return false
+	}
+}
+
+func (t *rtype) Comparable() bool {
+	switch t.Kind() {
+	case Func, Slice, Map:
+		return false
+	case Array:
+		return t.Elem().Comparable()
+	case Struct:
+		for i := 0; i < t.NumField(); i++ {
+			if !t.Field(i).Type.Comparable() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (t *rtype) Method(i int) (m Method) {
+	if t.Kind() == Interface {
+		tt := (*interfaceType)(unsafe.Pointer(t))
+		return tt.Method(i)
+	}
+	methods := t.exportedMethods()
+	if i < 0 || i >= len(methods) {
+		panic("reflect: Method index out of range")
+	}
+	p := methods[i]
+	pname := t.nameOff(p.name)
+	m.Name = pname.name()
+	fl := flag(Func)
+	mtyp := t.typeOff(p.mtyp)
+	ft := (*funcType)(unsafe.Pointer(mtyp))
+	in := make([]Type, 0, 1+len(ft.in()))
+	in = append(in, t)
+	for _, arg := range ft.in() {
+		in = append(in, arg)
+	}
+	out := make([]Type, 0, len(ft.out()))
+	for _, ret := range ft.out() {
+		out = append(out, ret)
+	}
+	mt := FuncOf(in, out, ft.IsVariadic())
+	m.Type = mt
+	prop := js.Global.Call("$methodSet", js.InternalObject(t).Get("jsType")).Index(i).Get("prop").String()
+	fn := js.MakeFunc(func(this *js.Object, arguments []*js.Object) interface{} {
+		rcvr := arguments[0]
+		return rcvr.Get(prop).Call("apply", rcvr, arguments[1:])
+	})
+	m.Func = Value{mt.(*rtype), unsafe.Pointer(fn.Unsafe()), fl}
+
+	m.Index = i
+	return m
+}
+
+func (v Value) object() *js.Object {
+	if v.typ.Kind() == Array || v.typ.Kind() == Struct {
+		return js.InternalObject(v.ptr)
+	}
+	if v.flag&flagIndir != 0 {
+		val := js.InternalObject(v.ptr).Call("$get")
+		if val != js.Global.Get("$ifaceNil") && val.Get("constructor") != jsType(v.typ) {
+			switch v.typ.Kind() {
+			case Uint64, Int64:
+				val = jsType(v.typ).New(val.Get("$high"), val.Get("$low"))
+			case Complex64, Complex128:
+				val = jsType(v.typ).New(val.Get("$real"), val.Get("$imag"))
+			case Slice:
+				if val == val.Get("constructor").Get("nil") {
+					val = jsType(v.typ).Get("nil")
+					break
+				}
+				newVal := jsType(v.typ).New(val.Get("$array"))
+				newVal.Set("$offset", val.Get("$offset"))
+				newVal.Set("$length", val.Get("$length"))
+				newVal.Set("$capacity", val.Get("$capacity"))
+				val = newVal
+			}
+		}
+		return js.InternalObject(val.Unsafe())
+	}
+	return js.InternalObject(v.ptr)
+}
+
+func (v Value) assignTo(context string, dst *rtype, target unsafe.Pointer) Value {
+	if v.flag&flagMethod != 0 {
+		v = makeMethodValue(context, v)
+	}
+
+	switch {
+	case directlyAssignable(dst, v.typ):
+		// Overwrite type so that they match.
+		// Same memory layout, so no harm done.
+		fl := v.flag&(flagAddr|flagIndir) | v.flag.ro()
+		fl |= flag(dst.Kind())
+		return Value{dst, v.ptr, fl}
+
+	case implements(dst, v.typ):
+		if target == nil {
+			target = unsafe_New(dst)
+		}
+		// GopherJS: Skip the v.Kind() == Interface && v.IsNil() if statement
+		//           from upstream. ifaceE2I below does not panic, and it needs
+		//           to run, given its custom implementation.
+		x := valueInterface(v, false)
+		if dst.NumMethod() == 0 {
+			*(*interface{})(target) = x
+		} else {
+			ifaceE2I(dst, x, target)
+		}
+		return Value{dst, target, flagIndir | flag(Interface)}
+	}
+
+	// Failed.
+	panic(context + ": value of type " + v.typ.String() + " is not assignable to type " + dst.String())
+}
+
+var callHelper = js.Global.Get("$call").Interface().(func(...interface{}) *js.Object)
+
+func (v Value) call(op string, in []Value) []Value {
+	var (
+		t    *funcType
+		fn   unsafe.Pointer
+		rcvr *js.Object
+	)
+	if v.flag&flagMethod != 0 {
+		_, t, fn = methodReceiver(op, v, int(v.flag)>>flagMethodShift)
+		rcvr = v.object()
+		if isWrapped(v.typ) {
+			rcvr = jsType(v.typ).New(rcvr)
+		}
+	} else {
+		t = (*funcType)(unsafe.Pointer(v.typ))
+		fn = unsafe.Pointer(v.object().Unsafe())
+		rcvr = js.Undefined
+	}
+
+	if fn == nil {
+		panic("reflect.Value.Call: call of nil function")
+	}
+
+	isSlice := op == "CallSlice"
+	n := t.NumIn()
+	if isSlice {
+		if !t.IsVariadic() {
+			panic("reflect: CallSlice of non-variadic function")
+		}
+		if len(in) < n {
+			panic("reflect: CallSlice with too few input arguments")
+		}
+		if len(in) > n {
+			panic("reflect: CallSlice with too many input arguments")
+		}
+	} else {
+		if t.IsVariadic() {
+			n--
+		}
+		if len(in) < n {
+			panic("reflect: Call with too few input arguments")
+		}
+		if !t.IsVariadic() && len(in) > n {
+			panic("reflect: Call with too many input arguments")
+		}
+	}
+	for _, x := range in {
+		if x.Kind() == Invalid {
+			panic("reflect: " + op + " using zero Value argument")
+		}
+	}
+	for i := 0; i < n; i++ {
+		if xt, targ := in[i].Type(), t.In(i); !xt.AssignableTo(targ) {
+			panic("reflect: " + op + " using " + xt.String() + " as type " + targ.String())
+		}
+	}
+	if !isSlice && t.IsVariadic() {
+		// prepare slice for remaining values
+		m := len(in) - n
+		slice := MakeSlice(t.In(n), m, m)
+		elem := t.In(n).Elem()
+		for i := 0; i < m; i++ {
+			x := in[n+i]
+			if xt := x.Type(); !xt.AssignableTo(elem) {
+				panic("reflect: cannot use " + xt.String() + " as type " + elem.String() + " in " + op)
+			}
+			slice.Index(i).Set(x)
+		}
+		origIn := in
+		in = make([]Value, n+1)
+		copy(in[:n], origIn)
+		in[n] = slice
+	}
+
+	nin := len(in)
+	if nin != t.NumIn() {
+		panic("reflect.Value.Call: wrong argument count")
+	}
+	nout := t.NumOut()
+
+	argsArray := js.Global.Get("Array").New(t.NumIn())
+	for i, arg := range in {
+		argsArray.SetIndex(i, unwrapJsObject(t.In(i), arg.assignTo("reflect.Value.Call", t.In(i).common(), nil).object()))
+	}
+	results := callHelper(js.InternalObject(fn), rcvr, argsArray)
+
+	switch nout {
+	case 0:
+		return nil
+	case 1:
+		return []Value{makeValue(t.Out(0), wrapJsObject(t.Out(0), results), 0)}
+	default:
+		ret := make([]Value, nout)
+		for i := range ret {
+			ret[i] = makeValue(t.Out(i), wrapJsObject(t.Out(i), results.Index(i)), 0)
+		}
+		return ret
+	}
+}
+
+func (v Value) Cap() int {
+	k := v.kind()
+	switch k {
+	case Array:
+		return v.typ.Len()
+	case Chan, Slice:
+		return v.object().Get("$capacity").Int()
+	}
+	panic(&ValueError{"reflect.Value.Cap", k})
+}
+
 var jsObjectPtr = reflectType(js.Global.Get("$jsObjectPtr"))
 
 func wrapJsObject(typ Type, val *js.Object) *js.Object {
@@ -744,6 +1090,81 @@ func unwrapJsObject(typ Type, val *js.Object) *js.Object {
 		return val.Get("object")
 	}
 	return val
+}
+
+func (v Value) Elem() Value {
+	switch k := v.kind(); k {
+	case Interface:
+		val := v.object()
+		if val == js.Global.Get("$ifaceNil") {
+			return Value{}
+		}
+		typ := reflectType(val.Get("constructor"))
+		return makeValue(typ, val.Get("$val"), v.flag.ro())
+
+	case Ptr:
+		if v.IsNil() {
+			return Value{}
+		}
+		val := v.object()
+		tt := (*ptrType)(unsafe.Pointer(v.typ))
+		fl := v.flag&flagRO | flagIndir | flagAddr
+		fl |= flag(tt.elem.Kind())
+		return Value{tt.elem, unsafe.Pointer(wrapJsObject(tt.elem, val).Unsafe()), fl}
+
+	default:
+		panic(&ValueError{"reflect.Value.Elem", k})
+	}
+}
+
+func (v Value) Field(i int) Value {
+	if v.kind() != Struct {
+		panic(&ValueError{"reflect.Value.Field", v.kind()})
+	}
+	tt := (*structType)(unsafe.Pointer(v.typ))
+	if uint(i) >= uint(len(tt.fields)) {
+		panic("reflect: Field index out of range")
+	}
+
+	prop := jsType(v.typ).Get("fields").Index(i).Get("prop").String()
+	field := &tt.fields[i]
+	typ := field.typ
+
+	fl := v.flag&(flagStickyRO|flagIndir|flagAddr) | flag(typ.Kind())
+	if !field.name.isExported() {
+		if field.embedded() {
+			fl |= flagEmbedRO
+		} else {
+			fl |= flagStickyRO
+		}
+	}
+
+	if tag := tt.fields[i].name.tag(); tag != "" && i != 0 {
+		if jsTag := getJsTag(tag); jsTag != "" {
+			for {
+				v = v.Field(0)
+				if v.typ == jsObjectPtr {
+					o := v.object().Get("object")
+					return Value{typ, unsafe.Pointer(jsType(PtrTo(typ)).New(
+						js.InternalObject(func() *js.Object { return js.Global.Call("$internalize", o.Get(jsTag), jsType(typ)) }),
+						js.InternalObject(func(x *js.Object) { o.Set(jsTag, js.Global.Call("$externalize", x, jsType(typ))) }),
+					).Unsafe()), fl}
+				}
+				if v.typ.Kind() == Ptr {
+					v = v.Elem()
+				}
+			}
+		}
+	}
+
+	s := js.InternalObject(v.ptr)
+	if fl&flagIndir != 0 && typ.Kind() != Array && typ.Kind() != Struct {
+		return Value{typ, unsafe.Pointer(jsType(PtrTo(typ)).New(
+			js.InternalObject(func() *js.Object { return wrapJsObject(typ, s.Get(prop)) }),
+			js.InternalObject(func(x *js.Object) { s.Set(prop, unwrapJsObject(typ, x)) }),
+		).Unsafe()), fl}
+	}
+	return makeValue(typ, wrapJsObject(typ, s.Get(prop)), fl)
 }
 
 func getJsTag(tag string) string {
@@ -785,30 +1206,265 @@ func getJsTag(tag string) string {
 		tag = tag[i+1:]
 
 		if name == "js" {
-			value, _ := unquote(qvalue)
+			value, _ := strconv.Unquote(qvalue)
 			return value
 		}
 	}
 	return ""
 }
 
-// PtrTo returns the pointer type with element t.
-// For example, if t represents type Foo, PtrTo(t) represents *Foo.
-func PtrTo(t Type) Type {
-	return t.(*rtype).ptrTo()
+func (v Value) Index(i int) Value {
+	switch k := v.kind(); k {
+	case Array:
+		tt := (*arrayType)(unsafe.Pointer(v.typ))
+		if i < 0 || i > int(tt.len) {
+			panic("reflect: array index out of range")
+		}
+		typ := tt.elem
+		fl := v.flag&(flagIndir|flagAddr) | v.flag.ro() | flag(typ.Kind())
+
+		a := js.InternalObject(v.ptr)
+		if fl&flagIndir != 0 && typ.Kind() != Array && typ.Kind() != Struct {
+			return Value{typ, unsafe.Pointer(jsType(PtrTo(typ)).New(
+				js.InternalObject(func() *js.Object { return wrapJsObject(typ, a.Index(i)) }),
+				js.InternalObject(func(x *js.Object) { a.SetIndex(i, unwrapJsObject(typ, x)) }),
+			).Unsafe()), fl}
+		}
+		return makeValue(typ, wrapJsObject(typ, a.Index(i)), fl)
+
+	case Slice:
+		s := v.object()
+		if i < 0 || i >= s.Get("$length").Int() {
+			panic("reflect: slice index out of range")
+		}
+		tt := (*sliceType)(unsafe.Pointer(v.typ))
+		typ := tt.elem
+		fl := flagAddr | flagIndir | v.flag.ro() | flag(typ.Kind())
+
+		i += s.Get("$offset").Int()
+		a := s.Get("$array")
+		if fl&flagIndir != 0 && typ.Kind() != Array && typ.Kind() != Struct {
+			return Value{typ, unsafe.Pointer(jsType(PtrTo(typ)).New(
+				js.InternalObject(func() *js.Object { return wrapJsObject(typ, a.Index(i)) }),
+				js.InternalObject(func(x *js.Object) { a.SetIndex(i, unwrapJsObject(typ, x)) }),
+			).Unsafe()), fl}
+		}
+		return makeValue(typ, wrapJsObject(typ, a.Index(i)), fl)
+
+	case String:
+		str := *(*string)(v.ptr)
+		if i < 0 || i >= len(str) {
+			panic("reflect: string index out of range")
+		}
+		fl := v.flag.ro() | flag(Uint8) | flagIndir
+		c := str[i]
+		return Value{uint8Type, unsafe.Pointer(&c), fl}
+
+	default:
+		panic(&ValueError{"reflect.Value.Index", k})
+	}
 }
 
-// copyVal returns a Value containing the map key or value at ptr,
-// allocating a new variable as needed.
-func copyVal(typ *rtype, fl flag, ptr unsafe.Pointer) Value {
-	if ifaceIndir(typ) {
-		// Copy result so future changes to the map
-		// won't change the underlying value.
-		c := unsafe_New(typ)
-		typedmemmove(typ, c, ptr)
-		return Value{typ, c, fl | flagIndir}
+func (v Value) InterfaceData() [2]uintptr {
+	panic(errors.New("InterfaceData is not supported by GopherJS"))
+}
+
+func (v Value) IsNil() bool {
+	switch k := v.kind(); k {
+	case Ptr, Slice:
+		return v.object() == jsType(v.typ).Get("nil")
+	case Chan:
+		return v.object() == js.Global.Get("$chanNil")
+	case Func:
+		return v.object() == js.Global.Get("$throwNilPointerError")
+	case Map:
+		return v.object() == js.InternalObject(false)
+	case Interface:
+		return v.object() == js.Global.Get("$ifaceNil")
+	case UnsafePointer:
+		return v.object().Unsafe() == 0
+	default:
+		panic(&ValueError{"reflect.Value.IsNil", k})
 	}
-	return Value{typ, *(*unsafe.Pointer)(ptr), fl}
+}
+
+func (v Value) Len() int {
+	switch k := v.kind(); k {
+	case Array, String:
+		return v.object().Length()
+	case Slice:
+		return v.object().Get("$length").Int()
+	case Chan:
+		return v.object().Get("$buffer").Get("length").Int()
+	case Map:
+		return js.Global.Call("$keys", v.object()).Length()
+	default:
+		panic(&ValueError{"reflect.Value.Len", k})
+	}
+}
+
+func (v Value) Pointer() uintptr {
+	switch k := v.kind(); k {
+	case Chan, Map, Ptr, UnsafePointer:
+		if v.IsNil() {
+			return 0
+		}
+		return v.object().Unsafe()
+	case Func:
+		if v.IsNil() {
+			return 0
+		}
+		return 1
+	case Slice:
+		if v.IsNil() {
+			return 0
+		}
+		return v.object().Get("$array").Unsafe()
+	default:
+		panic(&ValueError{"reflect.Value.Pointer", k})
+	}
+}
+
+func (v Value) Set(x Value) {
+	v.mustBeAssignable()
+	x.mustBeExported()
+	x = x.assignTo("reflect.Set", v.typ, nil)
+	if v.flag&flagIndir != 0 {
+		switch v.typ.Kind() {
+		case Array:
+			jsType(v.typ).Call("copy", js.InternalObject(v.ptr), js.InternalObject(x.ptr))
+		case Interface:
+			js.InternalObject(v.ptr).Call("$set", js.InternalObject(valueInterface(x, false)))
+		case Struct:
+			copyStruct(js.InternalObject(v.ptr), js.InternalObject(x.ptr), v.typ)
+		default:
+			js.InternalObject(v.ptr).Call("$set", x.object())
+		}
+		return
+	}
+	v.ptr = x.ptr
+}
+
+func (v Value) SetBytes(x []byte) {
+	v.mustBeAssignable()
+	v.mustBe(Slice)
+	if v.typ.Elem().Kind() != Uint8 {
+		panic("reflect.Value.SetBytes of non-byte slice")
+	}
+	slice := js.InternalObject(x)
+	if v.typ.Name() != "" || v.typ.Elem().Name() != "" {
+		typedSlice := jsType(v.typ).New(slice.Get("$array"))
+		typedSlice.Set("$offset", slice.Get("$offset"))
+		typedSlice.Set("$length", slice.Get("$length"))
+		typedSlice.Set("$capacity", slice.Get("$capacity"))
+		slice = typedSlice
+	}
+	js.InternalObject(v.ptr).Call("$set", slice)
+}
+
+func (v Value) SetCap(n int) {
+	v.mustBeAssignable()
+	v.mustBe(Slice)
+	s := js.InternalObject(v.ptr).Call("$get")
+	if n < s.Get("$length").Int() || n > s.Get("$capacity").Int() {
+		panic("reflect: slice capacity out of range in SetCap")
+	}
+	newSlice := jsType(v.typ).New(s.Get("$array"))
+	newSlice.Set("$offset", s.Get("$offset"))
+	newSlice.Set("$length", s.Get("$length"))
+	newSlice.Set("$capacity", n)
+	js.InternalObject(v.ptr).Call("$set", newSlice)
+}
+
+func (v Value) SetLen(n int) {
+	v.mustBeAssignable()
+	v.mustBe(Slice)
+	s := js.InternalObject(v.ptr).Call("$get")
+	if n < 0 || n > s.Get("$capacity").Int() {
+		panic("reflect: slice length out of range in SetLen")
+	}
+	newSlice := jsType(v.typ).New(s.Get("$array"))
+	newSlice.Set("$offset", s.Get("$offset"))
+	newSlice.Set("$length", n)
+	newSlice.Set("$capacity", s.Get("$capacity"))
+	js.InternalObject(v.ptr).Call("$set", newSlice)
+}
+
+func (v Value) Slice(i, j int) Value {
+	var (
+		cap int
+		typ Type
+		s   *js.Object
+	)
+	switch kind := v.kind(); kind {
+	case Array:
+		if v.flag&flagAddr == 0 {
+			panic("reflect.Value.Slice: slice of unaddressable array")
+		}
+		tt := (*arrayType)(unsafe.Pointer(v.typ))
+		cap = int(tt.len)
+		typ = SliceOf(tt.elem)
+		s = jsType(typ).New(v.object())
+
+	case Slice:
+		typ = v.typ
+		s = v.object()
+		cap = s.Get("$capacity").Int()
+
+	case String:
+		str := *(*string)(v.ptr)
+		if i < 0 || j < i || j > len(str) {
+			panic("reflect.Value.Slice: string slice index out of bounds")
+		}
+		return ValueOf(str[i:j])
+
+	default:
+		panic(&ValueError{"reflect.Value.Slice", kind})
+	}
+
+	if i < 0 || j < i || j > cap {
+		panic("reflect.Value.Slice: slice index out of bounds")
+	}
+
+	return makeValue(typ, js.Global.Call("$subslice", s, i, j), v.flag.ro())
+}
+
+func (v Value) Slice3(i, j, k int) Value {
+	var (
+		cap int
+		typ Type
+		s   *js.Object
+	)
+	switch kind := v.kind(); kind {
+	case Array:
+		if v.flag&flagAddr == 0 {
+			panic("reflect.Value.Slice: slice of unaddressable array")
+		}
+		tt := (*arrayType)(unsafe.Pointer(v.typ))
+		cap = int(tt.len)
+		typ = SliceOf(tt.elem)
+		s = jsType(typ).New(v.object())
+
+	case Slice:
+		typ = v.typ
+		s = v.object()
+		cap = s.Get("$capacity").Int()
+
+	default:
+		panic(&ValueError{"reflect.Value.Slice3", kind})
+	}
+
+	if i < 0 || j < i || k < j || k > cap {
+		panic("reflect.Value.Slice3: slice index out of bounds")
+	}
+
+	return makeValue(typ, js.Global.Call("$subslice", s, i, j, k), v.flag.ro())
+}
+
+func (v Value) Close() {
+	v.mustBe(Chan)
+	v.mustBeExported()
+	js.Global.Call("$close", v.object())
 }
 
 var selectHelper = js.Global.Get("$select").Interface().(func(...interface{}) *js.Object)
@@ -964,5 +1620,5 @@ func deepValueEqualJs(v1, v2 Value, visited [][2]unsafe.Pointer) bool {
 		return v1.object() == v2.object()
 	}
 
-	return js.Global.Call("$interfaceIsEqual", js.InternalObject(valueInterface(v1)), js.InternalObject(valueInterface(v2))).Bool()
+	return js.Global.Call("$interfaceIsEqual", js.InternalObject(valueInterface(v1, false)), js.InternalObject(valueInterface(v2, false))).Bool()
 }

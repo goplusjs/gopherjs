@@ -400,9 +400,9 @@ func Compile(importPath string, files []*ast.File, fileSet *token.FileSet, impor
 	for _, fun := range functions {
 		o := funcCtx.pkgCtx.Defs[fun.Name].(*types.Func)
 
-		if fun.Type.TypeParams.NumFields() > 0 {
+		if funcHasTypeParam(fun.Type) {
 			return nil, scanner.Error{
-				Pos: fileSet.Position(fun.Type.TypeParams.Pos()),
+				Pos: fileSet.Position(fun.Type.Pos()),
 				Msg: fmt.Sprintf("function %s: type parameters are not supported by GopherJS: https://github.com/gopherjs/gopherjs/issues/1013", o.Name()),
 			}
 		}
@@ -489,7 +489,7 @@ func Compile(importPath string, files []*ast.File, fileSet *token.FileSet, impor
 		}
 		typeName := funcCtx.objectName(o)
 
-		if named, ok := o.Type().(*types.Named); ok && named.TypeParams().Len() > 0 {
+		if named, ok := o.Type().(*types.Named); ok && namedHasTypeParam(named) {
 			return nil, scanner.Error{
 				Pos: fileSet.Position(o.Pos()),
 				Msg: fmt.Sprintf("type %s: type parameters are not supported by GopherJS: https://github.com/gopherjs/gopherjs/issues/1013", o.Name()),
