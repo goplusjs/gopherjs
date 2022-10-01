@@ -1,6 +1,6 @@
 module github.com/gopherjs/gopherjs
 
-go 1.18
+go 1.16
 
 require (
 	github.com/fsnotify/fsnotify v1.5.1
@@ -21,7 +21,6 @@ require (
 )
 
 require (
-	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	golang.org/x/term v0.0.0-20220411215600-e5f449aeb171 // indirect
 	golang.org/x/xerrors v0.0.0-20220411194840-2f41105eb62f // indirect
 )

@@ -185,7 +185,7 @@ func TestConvertNaNs(t *testing.T) {
 }
 
 func TestMapIterSet(t *testing.T) {
-	m := make(map[string]any, len(valueTests))
+	m := make(map[string]interface{}, len(valueTests))
 	for _, tt := range valueTests {
 		m[tt.s] = tt.i
 	}

@@ -71,7 +71,7 @@ func ParseFuncDecl(t *testing.T, src string) *ast.FuncDecl {
 // The node type must be *ast.File, *printer.CommentedNode, []ast.Decl,
 // []ast.Stmt, or assignment-compatible to ast.Expr, ast.Decl, ast.Spec, or
 // ast.Stmt.
-func Format(t *testing.T, fset *token.FileSet, node any) string {
+func Format(t *testing.T, fset *token.FileSet, node interface{}) string {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	if err := format.Node(buf, fset, node); err != nil {

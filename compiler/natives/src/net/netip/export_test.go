@@ -8,7 +8,7 @@ import (
 )
 
 //gopherjs:prune-original
-func MkAddr(u Uint128, z any) Addr {
+func MkAddr(u Uint128, z interface{}) Addr {
 	switch z := z.(type) {
 	case *intern.Value:
 		return Addr{u, z.Get().(string)}
