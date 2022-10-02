@@ -70,5 +70,5 @@ func GoRelease(goroot string) string {
 	}
 
 	// If everything else fails, return just the Go version without patch level.
-	return GoVersion
+	return runtime.Version()
 }
