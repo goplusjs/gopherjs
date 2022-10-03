@@ -1,14 +1,14 @@
 //go:build go1.18
 // +build go1.18
 
-package compiler
+package typeparams
 
 import (
 	"go/ast"
 	"go/types"
 )
 
-func hasTypeParam(t types.Type) bool {
+func HasTypeParam(t types.Type) bool {
 	switch t := t.(type) {
 	case *types.TypeParam:
 		return true
@@ -20,10 +20,14 @@ func hasTypeParam(t types.Type) bool {
 	return false
 }
 
-func funcHasTypeParam(t *ast.FuncType) bool {
+func NamedHasTypeParam(t *types.Named) bool {
+	return t.TypeParams() != nil
+}
+
+func FuncTypeHasTypeParam(t *ast.FuncType) bool {
 	return t.TypeParams != nil
 }
 
-func namedHasTypeParam(t *types.Named) bool {
-	return t.TypeParams() != nil
+func TypeSpecRemoveTypeParam(spec *ast.TypeSpec) {
+	spec.TypeParams = nil
 }

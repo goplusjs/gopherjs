@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gopherjs/gopherjs/internal/typeparams"
+
 	"github.com/fsnotify/fsnotify"
 	"github.com/gopherjs/gopherjs/compiler"
 	"github.com/gopherjs/gopherjs/compiler/astutil"
@@ -269,7 +271,7 @@ func parseAndAugment(xctx XContext, pkg *PackageData, isTest bool, fileSet *toke
 						if replacedDeclNames[s.Name.Name] {
 							s.Name = ast.NewIdent("_")
 							s.Type = &ast.StructType{Struct: s.Pos(), Fields: &ast.FieldList{}}
-							// s.TypeParams = nil
+							typeparams.TypeSpecRemoveTypeParam(s)
 						}
 					}
 				case token.VAR, token.CONST:
