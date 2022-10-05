@@ -21,7 +21,7 @@ func TestGoRelease(t *testing.T) {
 		if got == "" {
 			t.Fatalf("Got: goRelease(%q) returned \"\". Want: a Go version.", goroot)
 		}
-		if !strings.HasSuffix(Version, got) {
+		if !strings.HasSuffix(Version, "+"+got) {
 			t.Fatalf("Got: goRelease(%q) returned %q. Want: a fallback to GopherJS version suffix %q.", goroot, got, Version)
 		}
 	})

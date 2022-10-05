@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the GopherJS compiler version string.
-var Version = runtime.Version()
+const Version = "1.18.0+go1.18.5"
 
 // GoVersion is the current Go 1.x version that GopherJS is compatible with.
 var GoVersion = runtime.Version()[:6]
@@ -68,7 +68,12 @@ func GoRelease(goroot string) string {
 		// Prefer using the actual version of the GOROOT we are working with.
 		return v
 	}
-
+	// Use Go version GopherJS release was tested against as a fallback. By
+	// convention, it is included in the GopherJS version after the plus sign.
+	parts := strings.Split(Version, "+")
+	if len(parts) == 2 {
+		return parts[1]
+	}
 	// If everything else fails, return just the Go version without patch level.
 	return runtime.Version()
 }
