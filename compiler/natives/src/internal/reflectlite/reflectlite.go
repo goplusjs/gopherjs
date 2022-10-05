@@ -1,5 +1,5 @@
-//go:build js && go1.18
-// +build js,go1.18
+//go:build js
+// +build js
 
 package reflectlite
 

@@ -5,9 +5,11 @@ package reflect
 
 import (
 	"errors"
-	"internal/itoa"
+	"runtime"
 	"strconv"
 	"unsafe"
+
+	"internal/itoa"
 
 	"github.com/gopherjs/gopherjs/js"
 )
@@ -493,7 +495,7 @@ func StructOf(fields []StructField) Type {
 			}
 		}
 
-		if _, dup := fset[name]; dup {
+		if _, dup := fset[name]; dup && name != "_" {
 			panic("reflect.StructOf: duplicate field " + name)
 		}
 		fset[name] = struct{}{}
@@ -618,21 +620,24 @@ func makechan(typ *rtype, size int) (ch unsafe.Pointer) {
 }
 
 func makemap(t *rtype, cap int) (m unsafe.Pointer) {
-	return unsafe.Pointer(js.Global.Get("Object").New().Unsafe())
+	return unsafe.Pointer(js.Global.Get("Map").New().Unsafe())
 }
 
-func keyFor(t *rtype, key unsafe.Pointer) (*js.Object, string) {
+func keyFor(t *rtype, key unsafe.Pointer) (*js.Object, *js.Object) {
 	kv := js.InternalObject(key)
 	if kv.Get("$get") != js.Undefined {
 		kv = kv.Call("$get")
 	}
-	k := jsType(t.Key()).Call("keyFor", kv).String()
+	k := jsType(t.Key()).Call("keyFor", kv)
 	return kv, k
 }
 
 func mapaccess(t *rtype, m, key unsafe.Pointer) unsafe.Pointer {
+	if !js.InternalObject(m).Bool() {
+		return nil // nil map
+	}
 	_, k := keyFor(t, key)
-	entry := js.InternalObject(m).Get(k)
+	entry := js.InternalObject(m).Call("get", k)
 	if entry == js.Undefined {
 		return nil
 	}
@@ -651,30 +656,54 @@ func mapassign(t *rtype, m, key, val unsafe.Pointer) {
 	entry := js.Global.Get("Object").New()
 	entry.Set("k", kv)
 	entry.Set("v", jsVal)
-	js.InternalObject(m).Set(k, entry)
+	js.InternalObject(m).Call("set", k, entry)
 }
 
 func mapdelete(t *rtype, m unsafe.Pointer, key unsafe.Pointer) {
 	_, k := keyFor(t, key)
-	js.InternalObject(m).Delete(k)
+	if !js.InternalObject(m).Bool() {
+		return // nil map
+	}
+	js.InternalObject(m).Call("delete", k)
 }
 
-type mapIter struct {
+// TODO(nevkonatkte): The following three "faststr" implementations are meant to
+// perform better for the common case of string-keyed maps (see upstream:
+// https://github.com/golang/go/commit/23832ba2e2fb396cda1dacf3e8afcb38ec36dcba)
+// However, the stubs below will perform the same or worse because of the extra
+// string-to-pointer conversion. Not sure how to fix this without significant
+// code duplication, however.
+
+func mapaccess_faststr(t *rtype, m unsafe.Pointer, key string) (val unsafe.Pointer) {
+	return mapaccess(t, m, unsafe.Pointer(&key))
+}
+
+func mapassign_faststr(t *rtype, m unsafe.Pointer, key string, val unsafe.Pointer) {
+	mapassign(t, m, unsafe.Pointer(&key), val)
+}
+
+func mapdelete_faststr(t *rtype, m unsafe.Pointer, key string) {
+	mapdelete(t, m, unsafe.Pointer(&key))
+}
+
+type hiter struct {
 	t    Type
-	m    *js.Object
+	m    *js.Object // Underlying map object.
 	keys *js.Object
 	i    int
 
-	// last is the last object the iterator indicates. If this object exists, the functions that return the
-	// current key or value returns this object, regardless of the current iterator. It is because the current
-	// iterator might be stale due to key deletion in a loop.
+	// last is the last object the iterator indicates. If this object exists, the
+	// functions that return the current key or value returns this object,
+	// regardless of the current iterator. It is because the current iterator
+	// might be stale due to key deletion in a loop.
 	last *js.Object
 }
 
-func (iter *mapIter) skipUntilValidKey() {
+func (iter *hiter) skipUntilValidKey() {
 	for iter.i < iter.keys.Length() {
 		k := iter.keys.Index(iter.i)
-		if iter.m.Get(k.String()) != js.Undefined {
+		entry := iter.m.Call("get", k)
+		if entry != js.Undefined {
 			break
 		}
 		// The key is already deleted. Move on the next item.
@@ -683,57 +712,72 @@ func (iter *mapIter) skipUntilValidKey() {
 }
 
 func mapiterinit(t *rtype, m unsafe.Pointer) unsafe.Pointer {
-	return unsafe.Pointer(&mapIter{t, js.InternalObject(m), js.Global.Call("$keys", js.InternalObject(m)), 0, nil})
+	mapObj := js.InternalObject(m)
+	keys := js.Global.Get("Array").New()
+	if mapObj.Get("keys") != js.Undefined {
+		keysIter := mapObj.Call("keys")
+		if mapObj.Get("keys") != js.Undefined {
+			keys = js.Global.Get("Array").Call("from", keysIter)
+		}
+	}
+
+	return unsafe.Pointer(&hiter{
+		t:    t,
+		m:    mapObj,
+		keys: keys,
+		i:    0,
+		last: nil,
+	})
 }
 
-func mapiterkey(it unsafe.Pointer) unsafe.Pointer {
-	iter := (*mapIter)(it)
+func mapiterkey(_it unsafe.Pointer) unsafe.Pointer {
+	it := (*hiter)(_it)
 	var kv *js.Object
-	if iter.last != nil {
-		kv = iter.last
+	if it.last != nil {
+		kv = it.last
 	} else {
-		iter.skipUntilValidKey()
-		if iter.i == iter.keys.Length() {
+		it.skipUntilValidKey()
+		if it.i == it.keys.Length() {
 			return nil
 		}
-		k := iter.keys.Index(iter.i)
-		kv = iter.m.Get(k.String())
+		k := it.keys.Index(it.i)
+		kv = it.m.Call("get", k)
 
 		// Record the key-value pair for later accesses.
-		iter.last = kv
+		it.last = kv
 	}
-	return unsafe.Pointer(js.Global.Call("$newDataPointer", kv.Get("k"), jsType(PtrTo(iter.t.Key()))).Unsafe())
+	return unsafe.Pointer(js.Global.Call("$newDataPointer", kv.Get("k"), jsType(PtrTo(it.t.Key()))).Unsafe())
 }
 
-func mapiterelem(it unsafe.Pointer) unsafe.Pointer {
-	iter := (*mapIter)(it)
+func mapiterelem(_it unsafe.Pointer) unsafe.Pointer {
+	it := (*hiter)(_it)
 	var kv *js.Object
-	if iter.last != nil {
-		kv = iter.last
+	if it.last != nil {
+		kv = it.last
 	} else {
-		iter.skipUntilValidKey()
-		if iter.i == iter.keys.Length() {
+		it.skipUntilValidKey()
+		if it.i == it.keys.Length() {
 			return nil
 		}
-		k := iter.keys.Index(iter.i)
-		kv = iter.m.Get(k.String())
-		iter.last = kv
+		k := it.keys.Index(it.i)
+		kv = it.m.Call("get", k)
+		it.last = kv
 	}
-	return unsafe.Pointer(js.Global.Call("$newDataPointer", kv.Get("v"), jsType(PtrTo(iter.t.Elem()))).Unsafe())
+	return unsafe.Pointer(js.Global.Call("$newDataPointer", kv.Get("v"), jsType(PtrTo(it.t.Elem()))).Unsafe())
 }
 
-func mapiternext(it unsafe.Pointer) {
-	iter := (*mapIter)(it)
-	iter.last = nil
-	iter.i++
+func mapiternext(_it unsafe.Pointer) {
+	it := (*hiter)(_it)
+	it.last = nil
+	it.i++
 }
 
 func maplen(m unsafe.Pointer) int {
-	return js.Global.Call("$keys", js.InternalObject(m)).Length()
+	return js.InternalObject(m).Get("size").Int()
 }
 
 func cvtDirect(v Value, typ Type) Value {
-	var srcVal = v.object()
+	srcVal := v.object()
 	if srcVal == jsType(v.typ).Get("nil") {
 		return makeValue(typ, jsType(typ).Get("nil"), v.flag)
 	}
@@ -1275,28 +1319,6 @@ func getJsTag(tag string) string {
 	return ""
 }
 
-// CanConvert reports whether the value v can be converted to type t. If
-// v.CanConvert(t) returns true then v.Convert(t) will not panic.
-//
-// TODO(nevkontakte): this overlay can be removed after
-// https://github.com/golang/go/pull/48346 is in the lastest stable Go release.
-func (v Value) CanConvert(t Type) bool {
-	vt := v.Type()
-	if !vt.ConvertibleTo(t) {
-		return false
-	}
-	// Currently the only conversion that is OK in terms of type
-	// but that can panic depending on the value is converting
-	// from slice to pointer-to-array.
-	if vt.Kind() == Slice && t.Kind() == Ptr && t.Elem().Kind() == Array {
-		n := t.Elem().Len()
-		if n > v.Len() { // Avoiding use of unsafeheader.Slice here.
-			return false
-		}
-	}
-	return true
-}
-
 func (v Value) Index(i int) Value {
 	switch k := v.kind(); k {
 	case Array:
@@ -1381,7 +1403,7 @@ func (v Value) Len() int {
 	case Chan:
 		return v.object().Get("$buffer").Get("length").Int()
 	case Map:
-		return js.Global.Call("$keys", v.object()).Length()
+		return v.object().Get("size").Int()
 	default:
 		panic(&ValueError{"reflect.Value.Len", k})
 	}
@@ -1654,7 +1676,7 @@ func deepValueEqualJs(v1, v2 Value, visited [][2]unsafe.Pointer) bool {
 				return true
 			}
 		}
-		var n = v1.Len()
+		n := v1.Len()
 		if n != v2.Len() {
 			return false
 		}
@@ -1672,7 +1694,7 @@ func deepValueEqualJs(v1, v2 Value, visited [][2]unsafe.Pointer) bool {
 	case Ptr:
 		return deepValueEqualJs(v1.Elem(), v2.Elem(), visited)
 	case Struct:
-		var n = v1.NumField()
+		n := v1.NumField()
 		for i := 0; i < n; i++ {
 			if !deepValueEqualJs(v1.Field(i), v2.Field(i), visited) {
 				return false
@@ -1686,7 +1708,7 @@ func deepValueEqualJs(v1, v2 Value, visited [][2]unsafe.Pointer) bool {
 		if v1.object() == v2.object() {
 			return true
 		}
-		var keys = v1.MapKeys()
+		keys := v1.MapKeys()
 		if len(keys) != v2.Len() {
 			return false
 		}
@@ -1705,4 +1727,54 @@ func deepValueEqualJs(v1, v2 Value, visited [][2]unsafe.Pointer) bool {
 	}
 
 	return js.Global.Call("$interfaceIsEqual", js.InternalObject(valueInterface(v1, false)), js.InternalObject(valueInterface(v2, false))).Bool()
+}
+
+func methodNameSkip() string {
+	pc, _, _, _ := runtime.Caller(3)
+	f := runtime.FuncForPC(pc)
+	if f == nil {
+		return "unknown method"
+	}
+	// Function name extracted from the call stack can be different from vanilla
+	// Go. Here we try to fix stuff like "Object.$packages.reflect.Q.ptr.SetIterKey"
+	// into "Value.SetIterKey".
+	// This workaround may become obsolete after https://github.com/gopherjs/gopherjs/issues/1085
+	// is resolved.
+	name := f.Name()
+	idx := len(name) - 1
+	for idx > 0 {
+		if name[idx] == '.' {
+			break
+		}
+		idx--
+	}
+	if idx < 0 {
+		return name
+	}
+	return "Value" + name[idx:]
+}
+
+func verifyNotInHeapPtr(p uintptr) bool {
+	// Go runtime uses this method to make sure that a uintptr won't crash GC if
+	// interpreted as a heap pointer. This is not relevant for GopherJS, so we can
+	// always return true.
+	return true
+}
+
+// copy from go1.18
+func (v Value) CanConvert(t Type) bool {
+	vt := v.Type()
+	if !vt.ConvertibleTo(t) {
+		return false
+	}
+	// Currently the only conversion that is OK in terms of type
+	// but that can panic depending on the value is converting
+	// from slice to pointer-to-array.
+	if vt.Kind() == Slice && t.Kind() == Ptr && t.Elem().Kind() == Array {
+		n := t.Elem().Len()
+		if n > v.Len() {
+			return false
+		}
+	}
+	return true
 }
