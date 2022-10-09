@@ -61,7 +61,7 @@ func reflectType(typ *js.Object) *rtype {
 		rt := &rtype{
 			size: uintptr(typ.Get("size").Int()),
 			kind: uint8(typ.Get("kind").Int()),
-			str:  newNameOff(newName(internalStr(typ.Get("string")), "", typ.Get("exported").Bool())),
+			str:  resolveReflectName(newName(internalStr(typ.Get("string")), "", typ.Get("exported").Bool())),
 		}
 		js.InternalObject(rt).Set("jsType", typ)
 		typ.Set("reflectType", js.InternalObject(rt))
@@ -80,7 +80,7 @@ func reflectType(typ *js.Object) *rtype {
 					continue
 				}
 				reflectMethods = append(reflectMethods, method{
-					name: newNameOff(newMethodName(m)),
+					name: resolveReflectName(newMethodName(m)),
 					mtyp: newTypeOff(reflectType(m.Get("typ"))),
 				})
 			}
@@ -92,18 +92,18 @@ func reflectType(typ *js.Object) *rtype {
 					continue
 				}
 				reflectMethods = append(reflectMethods, method{
-					name: newNameOff(newMethodName(m)),
+					name: resolveReflectName(newMethodName(m)),
 					mtyp: newTypeOff(reflectType(m.Get("typ"))),
 				})
 			}
 			ut := &uncommonType{
-				pkgPath:  newNameOff(newName(internalStr(typ.Get("pkg")), "", false)),
+				pkgPath:  resolveReflectName(newName(internalStr(typ.Get("pkg")), "", false)),
 				mcount:   uint16(methodSet.Length()),
 				xcount:   xcount,
 				_methods: reflectMethods,
 			}
-			uncommonTypeMap[rt] = ut
 			js.InternalObject(ut).Set("jsType", typ)
+			js.InternalObject(rt).Set("uncommonType", js.InternalObject(ut))
 		}
 
 		switch rt.Kind() {
@@ -152,7 +152,7 @@ func reflectType(typ *js.Object) *rtype {
 			for i := range imethods {
 				m := methods.Index(i)
 				imethods[i] = imethod{
-					name: newNameOff(newMethodName(m)),
+					name: resolveReflectName(newMethodName(m)),
 					typ:  newTypeOff(reflectType(m.Get("typ"))),
 				}
 			}
@@ -222,10 +222,12 @@ func (t *uncommonType) exportedMethods() []method {
 	return t._methods[:t.xcount:t.xcount]
 }
 
-var uncommonTypeMap = make(map[*rtype]*uncommonType)
-
 func (t *rtype) uncommon() *uncommonType {
-	return uncommonTypeMap[t]
+	obj := js.InternalObject(t).Get("uncommonType")
+	if obj == js.Undefined {
+		return nil
+	}
+	return (*uncommonType)(unsafe.Pointer(obj.Unsafe()))
 }
 
 type funcType struct {
@@ -296,7 +298,7 @@ func (t *rtype) nameOff(off nameOff) name {
 	return nameOffList[int(off)]
 }
 
-func newNameOff(n name) nameOff {
+func resolveReflectName(n name) nameOff {
 	i := len(nameOffList)
 	nameOffList = append(nameOffList, n)
 	return nameOff(i)
