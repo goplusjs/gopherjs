@@ -1,4 +1,5 @@
 //go:build js && gopherjs
+// +build js,gopherjs
 
 package tests
 
