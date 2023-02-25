@@ -17,6 +17,6 @@ require (
 	github.com/visualfc/goembed v0.2.1
 	github.com/visualfc/goversion v1.1.0
 	golang.org/x/crypto v0.0.0-20200208060501-ecb85df21340
-	golang.org/x/sys v0.0.0-20200124204421-9fbb57f87de9
+	golang.org/x/sys v0.1.0
 	golang.org/x/tools v0.0.0-20200131143746-097c1f2eed26
 )
